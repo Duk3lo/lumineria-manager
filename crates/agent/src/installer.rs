@@ -53,6 +53,8 @@ pub async fn install_papermc(
     dest_dir: &Path,
     server_id: &str,
     tx: &mpsc::UnboundedSender<ServerEvent>,
+    min_ram: &str,
+    max_ram: &str,
 ) -> Result<String> {
     let version_url = format!("{}/{}/versions/{}", PAPER_API_BASE, project, mc_version);
     let builds_res = client
@@ -98,6 +100,8 @@ pub async fn install_papermc(
     )
     .await?;
 
+    write_start_script(dest_dir, project, min_ram, max_ram, &jar_name).await?;
+
     Ok(jar_name)
 }
 
@@ -108,6 +112,8 @@ pub async fn install_fabric(
     dest_dir: &Path,
     server_id: &str,
     tx: &mpsc::UnboundedSender<ServerEvent>,
+    min_ram: &str,
+    max_ram: &str,
 ) -> Result<()> {
     let response = client
         .get("https://meta.fabricmc.net/v2/versions/installer")
@@ -143,7 +149,6 @@ pub async fn install_fabric(
         percentage: 60,
     });
 
-
     let mut child = Command::new("java")
         .arg("-jar")
         .arg(&installer_path)
@@ -165,6 +170,14 @@ pub async fn install_fabric(
     }
 
     let _ = fs::remove_file(installer_path).await;
+    write_start_script(
+        dest_dir,
+        "fabric",
+        min_ram,
+        max_ram,
+        "fabric-server-launch.jar",
+    )
+    .await?;
     Ok(())
 }
 
@@ -175,6 +188,8 @@ pub async fn install_mod_installer(
     dest_dir: &Path,
     server_id: &str,
     tx: &mpsc::UnboundedSender<ServerEvent>,
+    min_ram: &str,
+    max_ram: &str,
 ) -> Result<()> {
     let installer_path = dest_dir.join(installer_name);
     download_file(
@@ -208,5 +223,57 @@ pub async fn install_mod_installer(
     }
 
     let _ = fs::remove_file(installer_path).await;
+
+    if dest_dir.join("run.sh").exists() {
+        write_start_script_run_sh(dest_dir).await?;
+    } else {
+        let jar = find_launch_jar(dest_dir).await?;
+        write_start_script(dest_dir, "forge", min_ram, max_ram, &jar).await?;
+    }
+
     Ok(())
+}
+
+async fn find_launch_jar(dest_dir: &Path) -> Result<String> {
+    let mut entries = fs::read_dir(dest_dir).await?;
+    let mut best: Option<String> = None;
+    while let Some(entry) = entries.next_entry().await? {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.ends_with(".jar") && !name.to_lowercase().contains("installer") {
+            best = Some(name);
+        }
+    }
+    best.ok_or_else(|| anyhow::anyhow!("No encontré un jar ejecutable tras la instalación"))
+}
+
+async fn write_launch_script(dest_dir: &Path, content: &str) -> Result<()> {
+    let path = dest_dir.join("start.sh");
+    fs::write(&path, content).await?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = fs::metadata(&path).await?.permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(&path, perms).await?;
+    }
+    Ok(())
+}
+
+pub async fn write_start_script(
+    dest_dir: &Path,
+    server_type: &str,
+    min_ram: &str,
+    max_ram: &str,
+    jar_name: &str,
+) -> Result<()> {
+    let launch = if server_type == "velocity" {
+        format!("java -Xms{min_ram} -Xmx{max_ram} -jar {jar_name}")
+    } else {
+        format!("java -Xms{min_ram} -Xmx{max_ram} -jar {jar_name} nogui")
+    };
+    write_launch_script(dest_dir, &format!("#!/bin/sh\ncd /data\nexec {launch}\n")).await
+}
+
+pub async fn write_start_script_run_sh(dest_dir: &Path) -> Result<()> {
+    write_launch_script(dest_dir, "#!/bin/sh\ncd /data\nexec sh run.sh nogui\n").await
 }

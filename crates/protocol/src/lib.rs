@@ -6,6 +6,7 @@ pub enum ServerStatus {
     Running,
     Stopped,
     Restarting,
+    Missing,
     Unknown,
 }
 
@@ -53,6 +54,9 @@ pub enum ClientRequest {
         id: String,
     },
     UnsubscribeLogs {
+        id: String,
+    },
+    RecreateContainer {
         id: String,
     },
     StartStack,

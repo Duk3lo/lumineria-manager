@@ -204,6 +204,8 @@ async fn handle_request(
                         &dest_dir,
                         &id,
                         &tx_clone,
+                        &config.min_ram,
+                        &config.max_ram,
                     )
                     .await
                     .map(|_| ()),
@@ -217,6 +219,8 @@ async fn handle_request(
                             &dest_dir,
                             &id,
                             &tx_clone,
+                            &config.min_ram,
+                            &config.max_ram,
                         )
                         .await
                     }
@@ -230,6 +234,8 @@ async fn handle_request(
                             &dest_dir,
                             &id,
                             &tx_clone,
+                            &config.min_ram,
+                            &config.max_ram,
                         )
                         .await
                     }
@@ -243,22 +249,38 @@ async fn handle_request(
                             &dest_dir,
                             &id,
                             &tx_clone,
+                            &config.min_ram,
+                            &config.max_ram,
                         )
                         .await
                     }
                     _ => Ok(()),
                 };
 
-                match result {
+                if let Err(e) = result {
+                    let _ = tx_clone.send(ServerEvent::Error {
+                        message: format!("Error de instalación: {e}"),
+                    });
+                    return;
+                }
+
+                let _ = tx_clone.send(ServerEvent::InstallProgress {
+                    id: id.clone(),
+                    step: "Creando contenedor".into(),
+                    percentage: 90,
+                });
+
+                let image = podman::java_image_for(&config.server_type, &config.mc_version);
+                match podman::create_container(&id, &dest_dir, config.port, image).await {
                     Ok(()) => {
                         let _ = tx_clone.send(ServerEvent::Ack {
                             ok: true,
-                            message: Some("Instalado exitosamente".into()),
+                            message: Some("Instalado y contenedor creado exitosamente".into()),
                         });
                     }
                     Err(e) => {
                         let _ = tx_clone.send(ServerEvent::Error {
-                            message: format!("Error de instalación: {e}"),
+                            message: format!("Se instaló pero no pude crear el contenedor: {e}"),
                         });
                     }
                 }
@@ -285,6 +307,8 @@ async fn handle_request(
 
                 let mut mc_version = "latest".to_string();
                 let mut server_type = "paper".to_string();
+                let mut min_ram = "1G".to_string();
+                let mut max_ram = "4G".to_string();
 
                 for line in env_data.lines() {
                     if line.starts_with("MC_VERSION=") {
@@ -301,6 +325,24 @@ async fn handle_request(
                             .split('=')
                             .nth(1)
                             .unwrap_or("paper")
+                            .replace('"', "")
+                            .trim()
+                            .to_string();
+                    }
+                    if line.starts_with("MIN_RAM=") {
+                        min_ram = line
+                            .split('=')
+                            .nth(1)
+                            .unwrap_or("1G")
+                            .replace('"', "")
+                            .trim()
+                            .to_string();
+                    }
+                    if line.starts_with("MAX_RAM=") {
+                        max_ram = line
+                            .split('=')
+                            .nth(1)
+                            .unwrap_or("4G")
                             .replace('"', "")
                             .trim()
                             .to_string();
@@ -322,6 +364,8 @@ async fn handle_request(
                         &dest_dir,
                         &id,
                         &tx_clone,
+                        &min_ram,
+                        &max_ram,
                     )
                     .await
                     .map(|_| ()),
@@ -335,16 +379,78 @@ async fn handle_request(
                     }
                 };
 
-                if result.is_ok() {
-                    let _ = tx_clone.send(ServerEvent::Ack {
-                        ok: true,
-                        message: Some(
-                            "Motor actualizado al build recomendado de forma estable".into(),
-                        ),
-                    });
+                match result {
+                    Ok(()) => {
+                        let _ = tx_clone.send(ServerEvent::Ack {
+                    ok: true,
+                    message: Some("Motor actualizado. El jar nuevo se usará al reiniciar el servidor.".into()),
+                });
+                    }
+                    Err(e) => {
+                        let _ = tx_clone.send(ServerEvent::Error {
+                            message: format!("Error al actualizar: {e}"),
+                        });
+                    }
                 }
             });
         }
+
+        ClientRequest::RecreateContainer { id } => {
+    let tx_clone = tx.clone();
+    let root_clone = state.root.clone();
+    tokio::spawn(async move {
+        let dest_dir = root_clone.join(&id);
+        let env_path = dest_dir.join("server.env");
+
+        let env_data = match fs::read_to_string(&env_path).await {
+            Ok(d) => d,
+            Err(_) => {
+                let _ = tx_clone.send(ServerEvent::Error {
+                    message: "No encontré la configuración de esta instancia.".into(),
+                });
+                return;
+            }
+        };
+
+        let mut server_type = "paper".to_string();
+        let mut mc_version = "latest".to_string();
+        let mut port: u16 = 25565;
+
+        for line in env_data.lines() {
+            if line.starts_with("SERVER_TYPE=") {
+                server_type = line.split('=').nth(1).unwrap_or("paper").replace('"', "").trim().to_string();
+            }
+            if line.starts_with("MC_VERSION=") {
+                mc_version = line.split('=').nth(1).unwrap_or("latest").replace('"', "").trim().to_string();
+            }
+            if line.starts_with("SERVER_PORT=") {
+                port = line.split('=').nth(1).unwrap_or("25565").replace('"', "").trim().parse().unwrap_or(25565);
+            }
+        }
+
+        if !dest_dir.join("start.sh").exists() {
+            let _ = tx_clone.send(ServerEvent::Error {
+                message: "Falta start.sh — usá Auto-Update Build para reinstalar el motor antes de recrear.".into(),
+            });
+            return;
+        }
+
+        let image = podman::java_image_for(&server_type, &mc_version);
+        match podman::create_container(&id, &dest_dir, port, image).await {
+            Ok(()) => {
+                let _ = tx_clone.send(ServerEvent::Ack {
+                    ok: true,
+                    message: Some("Contenedor recreado".into()),
+                });
+            }
+            Err(e) => {
+                let _ = tx_clone.send(ServerEvent::Error {
+                    message: format!("No pude recrear el contenedor: {e}"),
+                });
+            }
+        }
+    });
+}
     }
 }
 fn run_action(tx: &mpsc::UnboundedSender<ServerEvent>, id: &str, result: Result<()>) {

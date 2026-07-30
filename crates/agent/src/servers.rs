@@ -109,6 +109,14 @@ pub fn container_status(container_id: &str) -> ServerStatus {
                 _ => ServerStatus::Unknown,
             }
         }
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).to_lowercase();
+            if stderr.contains("no such container") || stderr.contains("no container with name") {
+                ServerStatus::Missing
+            } else {
+                ServerStatus::Unknown
+            }
+        }
         _ => ServerStatus::Unknown,
     }
 }

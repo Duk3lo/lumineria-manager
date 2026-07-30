@@ -7,6 +7,15 @@ let cachedNeoForge = [];
 let cachedForge = {};
 let cachedProjectVersions = {};
 
+const STATUS_LABELS = {
+  running: 'En ejecución',
+  stopped: 'Detenido',
+  restarting: 'Reiniciando',
+  missing: 'Contenedor eliminado',
+  unknown: 'Desconocido',
+};
+
+
 function mcVersionToNeoforgePrefix(mcVersion) {
   const parts = mcVersion.split('.');
   if (parts[0] === '1') {
@@ -96,7 +105,7 @@ async function updateVersions() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById('tab-local').onclick = () => switchTab('local');
   document.getElementById('tab-remote').onclick = () => switchTab('remote');
 
@@ -108,6 +117,7 @@ document.addEventListener("DOMContentLoaded", () => {
   };
   document.getElementById('new-version').onchange = updateLoaders;
   document.getElementById('btn-submit-create').onclick = submitCreateServer;
+  document.getElementById('btn-refresh-list').onclick = () => invoke_ws_action({ type: "list_servers" });
 
   document.getElementById('btn-pick-folder').onclick = async () => {
     selectedFolder = await invoke('pick_folder');
@@ -121,7 +131,10 @@ document.addEventListener("DOMContentLoaded", () => {
     updateStatus("Iniciando agente local...", "#f9e2af");
     try {
       const url = await invoke('start_local_agent', { rootPath: selectedFolder });
-      await connectAgent(url);
+      const ok = await connectAgent(url);
+      if (ok) {
+        await invoke('save_last_connection', { mode: 'local', folder: selectedFolder, url: null });
+      }
     } catch (e) {
       updateStatus("Error: " + e, "#f38ba8");
     }
@@ -129,10 +142,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   document.getElementById('btn-connect-remote').onclick = async () => {
     const url = document.getElementById('input-url').value;
-    await connectAgent(url);
+    const ok = await connectAgent(url);
+    if (ok) {
+      await invoke('save_last_connection', { mode: 'remote', folder: null, url });
+    }
   };
 
-  listen("server-event", (event) => {
+  await listen("server-event", (event) => {
     const data = event.payload;
     if (data.type === "servers") {
       renderServers(data.servers);
@@ -147,6 +163,8 @@ document.addEventListener("DOMContentLoaded", () => {
       alert("Error: " + data.message);
     }
   });
+
+  await restoreLastConnection();
 });
 
 async function openCreatorModal() {
@@ -154,6 +172,44 @@ async function openCreatorModal() {
   await updateVersions();
   await updateLoaders();
 }
+
+async function restoreLastConnection() {
+  try {
+    const last = await invoke('load_last_connection');
+    if (!last) return;
+
+    if (last.mode === 'local' && last.folder) {
+      switchTab('local');
+      selectedFolder = last.folder;
+      document.getElementById('folder-path').innerText = selectedFolder;
+      document.getElementById('btn-start-local').disabled = false;
+      updateStatus("Reconectando a la última carpeta local...", "#f9e2af");
+      try {
+        const url = await invoke('start_local_agent', { rootPath: selectedFolder });
+        await connectAgent(url);
+      } catch (e) {
+        const msg = String(e);
+        if (msg.includes("ya no existe")) {
+          updateStatus("La carpeta registrada fue eliminada o movida. Elegí una nueva.", "#f38ba8");
+          selectedFolder = null;
+          document.getElementById('folder-path').innerText = "Ninguna carpeta seleccionada";
+          document.getElementById('btn-start-local').disabled = true;
+          await invoke('save_last_connection', { mode: 'local', folder: null, url: null });
+        } else {
+          updateStatus("Error al reconectar: " + e, "#f38ba8");
+        }
+      }
+    } else if (last.mode === 'remote' && last.url) {
+      switchTab('remote');
+      document.getElementById('input-url').value = last.url;
+      updateStatus("Reconectando al último servidor remoto...", "#f9e2af");
+      await connectAgent(last.url);
+    }
+  } catch (e) {
+    console.error("No pude cargar la última conexión:", e);
+  }
+}
+
 
 async function updateLoaders() {
   const type = document.getElementById('new-type').value;
@@ -242,23 +298,19 @@ async function connectAgent(url) {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     updateStatus(`Conectando (Intento ${attempt}/${maxAttempts})...`, "#f9e2af");
     try {
-      // Intentamos conectar
       await invoke('connect_agent', { url });
-
-      // Si tiene éxito, actualizamos estado y pedimos servidores
       updateStatus("Conectado", "#a6e3a1");
       invoke_ws_action({ type: "list_servers" });
-      return; // <-- Salimos de la función porque ya conectó con éxito
+      return true;
     } catch (e) {
       if (attempt === maxAttempts) {
-        // Si fue el último intento y falló, reportamos el error definitivo
         updateStatus("Fallo de conexión definitivo: " + e, "#f38ba8");
       } else {
-        // Si falló pero quedan intentos, esperamos 800 milisegundos antes de reintentar
         await new Promise(resolve => setTimeout(resolve, 800));
       }
     }
   }
+  return false;
 }
 
 async function invoke_ws_action(payload) {
@@ -279,18 +331,24 @@ function renderServers(servers) {
   ul.innerHTML = "";
   servers.forEach(server => {
     const li = document.createElement('li');
+    const isMissing = server.status === 'missing';
+    const statusLabel = STATUS_LABELS[server.status] || server.status;
 
     li.innerHTML = `
       <div class="server-header">
         <strong>${server.display_name}</strong>
-        <span>Tipo: ${server.server_type.toUpperCase()} | MC: ${server.mc_version} | Status: ${server.status}</span>
+        <span>Tipo: ${server.server_type.toUpperCase()} | MC: ${server.mc_version} | Status: ${statusLabel}</span>
       </div>
       <div class="actions">
-        <button onclick="sendAction('start_server', '${server.id}')" style="background-color: #a6e3a1;">Iniciar</button>
-        <button onclick="sendAction('stop_server', '${server.id}')" style="background-color: #f38ba8;">Detener</button>
-        <button onclick="sendAction('restart_server', '${server.id}')" style="background-color: #f9e2af;">Reiniciar</button>
-        ${(server.server_type === 'paper' || server.server_type === 'velocity') ?
-        `<button onclick="sendAction('auto_update', '${server.id}')" style="background-color: #89b4fa;">Auto-Update Build</button>` : ''}
+        ${isMissing
+          ? `<button onclick="sendAction('recreate_container', '${server.id}')" style="background-color: #cba6f7;">Recrear Contenedor</button>`
+          : `
+            <button onclick="sendAction('start_server', '${server.id}')" style="background-color: #a6e3a1;">Iniciar</button>
+            <button onclick="sendAction('stop_server', '${server.id}')" style="background-color: #f38ba8;">Detener</button>
+            <button onclick="sendAction('restart_server', '${server.id}')" style="background-color: #f9e2af;">Reiniciar</button>
+            ${(server.server_type === 'paper' || server.server_type === 'velocity') ?
+              `<button onclick="sendAction('auto_update', '${server.id}')" style="background-color: #89b4fa;">Auto-Update Build</button>` : ''}
+          `}
       </div>
     `;
     ul.appendChild(li);
@@ -303,6 +361,7 @@ window.sendAction = async function (type, id) {
     if (type === "start_server") await invoke('start_server', { id });
     if (type === "stop_server") await invoke('stop_server', { id });
     if (type === "restart_server") await invoke('restart_server', { id });
+    if (type === "recreate_container") await invoke('recreate_container', { id });
     if (type === "auto_update") {
       updateStatus("Actualizando compilación del motor...", "#fab387");
       await invoke('auto_update_server', { id });
