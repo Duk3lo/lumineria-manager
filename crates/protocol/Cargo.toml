@@ -1,0 +1,11 @@
+[package]
+name = "protocol"
+version = "0.1.0"
+edition = "2021"
+
+# Este crate NO debe tener lógica de negocio, solo tipos.
+# Lo importan tanto el agente (VPS) como el cliente (Tauri),
+# así el compilador te avisa si un mensaje queda desincronizado
+# entre los dos lados.
+[dependencies]
+serde = { version = "1", features = ["derive"] }

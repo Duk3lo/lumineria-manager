@@ -1,0 +1,124 @@
+//! Descubre servidores recorriendo `root` en busca de subcarpetas que
+//! tengan un `server.env` adentro — el mismo layout que ya tenés en
+//! `minecraft-network/`. No hace falta un registro central: la carpeta
+//! ES la fuente de verdad, igual que hoy.
+
+use anyhow::{Context, Result};
+use protocol::{ServerInfo, ServerStatus};
+use std::collections::HashMap;
+use std::path::Path;
+use std::process::Command;
+
+pub fn discover(root: &Path) -> Result<Vec<ServerInfo>> {
+    let mut out = Vec::new();
+
+    for entry in
+        std::fs::read_dir(root).with_context(|| format!("no pude leer {}", root.display()))?
+    {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let env_path = path.join("server.env");
+        if !env_path.exists() {
+            continue;
+        }
+
+        let folder_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or_default()
+            .to_string();
+
+        let env = parse_env_file(&env_path)?;
+        let container_id = sanitize_container_name(&folder_name);
+        let status = container_status(&container_id);
+
+        out.push(ServerInfo {
+            id: container_id,
+            display_name: env.get("SERVER_NAME").cloned().unwrap_or(folder_name),
+            server_type: env.get("SERVER_TYPE").cloned().unwrap_or_default(),
+            port: env
+                .get("SERVER_PORT")
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(25565),
+            mc_version: env
+                .get("MC_VERSION")
+                .or_else(|| env.get("SERVER_MC_VERSION"))
+                .cloned()
+                .unwrap_or_default(),
+            mod_source: env
+                .get("MOD_SOURCE")
+                .cloned()
+                .unwrap_or_else(|| "requirements".into()),
+            status,
+        });
+    }
+
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(out)
+}
+
+/// Parser mínimo de KEY="VALUE" / KEY=VALUE. No es un parser de shell
+/// completo a propósito: server.env lo generás vos mismo con formato
+/// simple, no necesita soportar expansión de variables ni comandos.
+fn parse_env_file(path: &Path) -> Result<HashMap<String, String>> {
+    let content = std::fs::read_to_string(path)?;
+    let mut map = HashMap::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim().trim_matches('"').trim_matches('\'');
+        map.insert(key.trim().to_string(), value.to_string());
+    }
+
+    Ok(map)
+}
+
+/// Misma regla que `sanitize_name()` en lib_podman.sh, para que el
+/// nombre de contenedor calculado acá coincida con el que genera
+/// `generate_podman_compose` (compose.yaml).
+pub fn sanitize_container_name(folder: &str) -> String {
+    let cleaned: String = folder
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let trimmed = cleaned.trim_matches('_');
+    if trimmed.is_empty() {
+        "server".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+pub fn container_status(container_id: &str) -> ServerStatus {
+    let output = Command::new("podman")
+        .args(["inspect", "-f", "{{.State.Status}}", container_id])
+        .output();
+
+    match output {
+        Ok(out) if out.status.success() => {
+            let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            match s.as_str() {
+                "running" => ServerStatus::Running,
+                "restarting" => ServerStatus::Restarting,
+                "exited" | "created" | "stopped" => ServerStatus::Stopped,
+                _ => ServerStatus::Unknown,
+            }
+        }
+        _ => ServerStatus::Unknown,
+    }
+}
