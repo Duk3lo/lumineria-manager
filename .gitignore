@@ -24,3 +24,6 @@ yarn-error.log*
 *.njsproj
 *.sln
 *.sw?
+
+# Ignorar binarios sidecar de Tauri (¡Muy importante!)
+client/src-tauri/lumineria-agent-*
