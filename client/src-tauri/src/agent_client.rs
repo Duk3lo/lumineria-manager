@@ -31,12 +31,9 @@ pub async fn connect(app: AppHandle, url: String) -> anyhow::Result<AgentConnect
         }
     });
 
-    // Tarea: cada ServerEvent del agente se reemite como evento de Tauri.
-    // El frontend lo escucha con `listen("server-event", callback)`.
     tokio::spawn(async move {
         while let Some(Ok(msg)) = read.next().await {
             let Message::Text(text) = msg else { continue };
-            // Extraemos el texto usando as_str() de Utf8Bytes
             let Ok(event) = serde_json::from_str::<ServerEvent>(text.as_str()) else {
                 continue;
             };

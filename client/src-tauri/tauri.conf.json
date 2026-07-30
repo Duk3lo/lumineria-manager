@@ -4,13 +4,15 @@
   "version": "0.1.0",
   "identifier": "com.lumineria.client",
   "build": {
+    "beforeDevCommand": "cargo build -p agent && cp ../target/debug/lumineria-agent src-tauri/lumineria-agent-x86_64-unknown-linux-gnu",
+    "beforeBuildCommand": "cargo build -p agent --release && cp ../target/release/lumineria-agent src-tauri/lumineria-agent-x86_64-unknown-linux-gnu",
     "frontendDist": "../src"
   },
   "app": {
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "client",
+        "title": "Lumineria Manager",
         "width": 800,
         "height": 600
       }
@@ -28,6 +30,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "externalBin": [
+      "lumineria-agent"
     ]
   }
 }

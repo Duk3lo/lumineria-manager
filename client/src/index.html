@@ -1,39 +1,89 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="stylesheet" href="styles.css" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri App</title>
-    <script type="module" src="/main.js" defer></script>
-  </head>
+<html lang="es">
 
-  <body>
-    <main class="container">
-      <h1>Welcome to Tauri</h1>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="stylesheet" href="styles.css" />
+  <title>Lumineria Manager</title>
+  <script type="module" src="/main.js" defer></script>
+</head>
 
-      <div class="row">
-        <a href="https://tauri.app" target="_blank">
-          <img src="/assets/tauri.svg" class="logo tauri" alt="Tauri logo" />
-        </a>
-        <a
-          href="https://developer.mozilla.org/en-US/docs/Web/JavaScript"
-          target="_blank"
-        >
-          <img
-            src="/assets/javascript.svg"
-            class="logo vanilla"
-            alt="JavaScript logo"
-          />
-        </a>
+<body>
+  <div class="container">
+    <h1>Lumineria Manager</h1>
+
+    <div class="tabs">
+      <button id="tab-local" class="active">Modo Local</button>
+      <button id="tab-remote">Modo Remoto</button>
+      <button id="tab-new" style="margin-left: auto; background-color: #a6e3a1;">+ Creador de Servidor</button>
+    </div>
+
+    <div id="creator-modal" class="modal" style="display: none;">
+      <div class="modal-content">
+        <h2>Crear Nuevo Servidor</h2>
+        <label>Nombre del Servidor</label>
+        <input type="text" id="new-name" placeholder="smp-mods" />
+
+        <label>Motor</label>
+        <select id="new-type">
+          <option value="paper">PaperMC (Spigot/Paper)</option>
+          <option value="velocity">Velocity Proxy</option>
+          <option value="fabric">Fabric</option>
+          <option value="neoforge">NeoForge</option>
+          <option value="forge">Forge</option>
+        </select>
+
+        <label id="version-lbl">Versión de Minecraft</label>
+        <select id="new-version">
+          <option value="1.21.1">1.21.1</option>
+          <option value="1.20.1">1.20.1</option>
+          <option value="1.19.2">1.19.2</option>
+        </select>
+
+        <label id="loader-lbl">Versión del Cargador (Loader)</label>
+        <select id="new-loader"></select>
+
+        <h3 style="margin-top: 15px;">Parámetros Extras (Guardados localmente)</h3>
+        <label>Puerto del Servidor</label>
+        <input type="number" id="new-port" value="25565" />
+
+        <label>RAM Mínima / Máxima</label>
+        <div style="display: flex; gap: 10px;">
+          <input type="text" id="new-min-ram" value="1G" />
+          <input type="text" id="new-max-ram" value="4G" />
+        </div>
+
+        <label style="display: block; margin-top: 10px;">
+          <input type="checkbox" id="new-online-mode" /> Online Mode (Cuentas Premium)
+        </label>
+
+        <div style="margin-top: 20px; display: flex; gap: 10px;">
+          <button id="btn-submit-create" style="flex: 1;">Crear e Instalar</button>
+          <button id="btn-cancel-create" style="background-color: #f38ba8;">Cancelar</button>
+        </div>
       </div>
-      <p>Click on the Tauri logo to learn more about the framework</p>
+    </div>
 
-      <form class="row" id="greet-form">
-        <input id="greet-input" placeholder="Enter a name..." />
-        <button type="submit">Greet</button>
-      </form>
-      <p id="greet-msg"></p>
-    </main>
-  </body>
+    <div id="view-local" class="view active">
+      <p>Inicia el agente en tu propia máquina.</p>
+      <button id="btn-pick-folder">Elegir Carpeta de Servidores</button>
+      <p id="folder-path" class="path-text">Ninguna carpeta seleccionada</p>
+      <button id="btn-start-local" disabled>Iniciar y Conectar</button>
+    </div>
+
+    <div id="view-remote" class="view" style="display: none;">
+      <p>Conéctate a un VPS remoto (ej: ws://tuserver:8080/ws)</p>
+      <input type="text" id="input-url" placeholder="ws://127.0.0.1:8756/ws" />
+      <button id="btn-connect-remote">Conectar</button>
+    </div>
+
+    <div id="status-panel">Estado: Desconectado</div>
+    <p id="install-progress-lbl" style="color: #fab387; font-weight: bold;"></p>
+
+    <h2>Servidores</h2>
+    <ul id="server-list"></ul>
+  </div>
+</body>
+
 </html>

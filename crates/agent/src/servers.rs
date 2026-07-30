@@ -1,7 +1,3 @@
-//! Descubre servidores recorriendo `root` en busca de subcarpetas que
-//! tengan un `server.env` adentro — el mismo layout que ya tenés en
-//! `minecraft-network/`. No hace falta un registro central: la carpeta
-//! ES la fuente de verdad, igual que hoy.
 
 use anyhow::{Context, Result};
 use protocol::{ServerInfo, ServerStatus};
@@ -60,9 +56,6 @@ pub fn discover(root: &Path) -> Result<Vec<ServerInfo>> {
     Ok(out)
 }
 
-/// Parser mínimo de KEY="VALUE" / KEY=VALUE. No es un parser de shell
-/// completo a propósito: server.env lo generás vos mismo con formato
-/// simple, no necesita soportar expansión de variables ni comandos.
 fn parse_env_file(path: &Path) -> Result<HashMap<String, String>> {
     let content = std::fs::read_to_string(path)?;
     let mut map = HashMap::new();
@@ -82,9 +75,6 @@ fn parse_env_file(path: &Path) -> Result<HashMap<String, String>> {
     Ok(map)
 }
 
-/// Misma regla que `sanitize_name()` en lib_podman.sh, para que el
-/// nombre de contenedor calculado acá coincida con el que genera
-/// `generate_podman_compose` (compose.yaml).
 pub fn sanitize_container_name(folder: &str) -> String {
     let cleaned: String = folder
         .chars()
