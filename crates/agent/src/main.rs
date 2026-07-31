@@ -2,6 +2,7 @@ mod api;
 mod docker;
 mod installer;
 mod system;
+mod publisher;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -33,7 +34,7 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::CheckDeps { install } => system::deps::check_and_maybe_install(install)?,
+        Command::CheckDeps { install } => system::deps::check_and_maybe_install(install).await?,
         Command::Serve { root, bind } => {
             let root = root.canonicalize()?;
             api::ws::serve(root, bind).await?;

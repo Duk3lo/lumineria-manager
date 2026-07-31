@@ -33,6 +33,11 @@ pub fn run() {
             commands::servers::open_folder_in_os,
             commands::servers::subscribe_logs,
             commands::servers::unsubscribe_logs,
+            commands::servers::add_mod_packwiz,
+            commands::servers::remove_mod_packwiz,
+            commands::servers::upload_mod_packwiz,
+            commands::servers::publish_packwiz,
+            commands::servers::list_packwiz_mods,
             
             // --- Versions ---
             commands::versions::fetch_neoforge_versions,

@@ -70,6 +70,27 @@ pub enum ClientRequest {
         id: String,
         config: ServerConfigParams,
     },
+    AddModPackwiz {
+        id: String,
+        query: String,
+    },
+    RemoveModPackwiz {
+        id: String,
+        query: String,
+    },
+    UploadModPackwiz {
+        id: String,
+        filename: String,
+        data_base64: String,
+        folder: String,
+    },
+    PublishPackwiz {
+        id: String,
+        pack_key: String,
+    },
+    ListPackwizMods {
+        id: String,
+    },
     AutoUpdateServer {
         id: String,
     },
@@ -102,4 +123,19 @@ pub enum ServerEvent {
         step: String,
         percentage: u8,
     },
+    PackwizLog {
+        id: String,
+        line: String,
+    },
+    PackwizModsList {
+        id: String,
+        mods: Vec<PackwizMod>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackwizMod {
+    pub name: String,
+    pub filename: String,
+    pub side: String, 
 }

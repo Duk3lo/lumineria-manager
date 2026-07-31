@@ -58,6 +58,27 @@ export async function openServerFolder(id) {
     }
 }
 
+export async function addMod(id, query) {
+    updateStatus("Añadiendo mod...", "#f9e2af");
+    await invoke('add_mod_packwiz', { id, query });
+}
+export async function removeMod(id, query) {
+    updateStatus("Eliminando mod...", "#f9e2af");
+    await invoke('remove_mod_packwiz', { id, query });
+}
+export async function uploadMod(id, filename, dataBase64, folder) {
+    updateStatus("Subiendo archivo...", "#f9e2af");
+    await invoke('upload_mod_packwiz', { id, filename, dataBase64, folder });
+}
+export async function publishModpack(id, packKey) {
+    updateStatus("Publicando en VPS...", "#f9e2af");
+    await invoke('publish_packwiz', { id, packKey });
+}
+
+export async function listPackwizMods(id) {
+    await invoke('list_packwiz_mods', { id });
+}
+
 // Vinculación global para que el HTML pueda llamar las funciones
 window.sendAction = sendAction;
 window.confirmDelete = confirmDelete;

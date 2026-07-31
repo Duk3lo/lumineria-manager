@@ -46,6 +46,30 @@ pub async fn unsubscribe_logs(state: State<'_, AppState>, id: String) -> Result<
 }
 
 #[tauri::command]
+pub async fn add_mod_packwiz(state: tauri::State<'_, AppState>, id: String, query: String) -> Result<(), String> {
+    send(&state, ClientRequest::AddModPackwiz { id, query }).await
+}
+
+#[tauri::command]
+pub async fn remove_mod_packwiz(state: tauri::State<'_, AppState>, id: String, query: String) -> Result<(), String> {
+    send(&state, ClientRequest::RemoveModPackwiz { id, query }).await
+}
+
+#[tauri::command]
+pub async fn upload_mod_packwiz(state: tauri::State<'_, AppState>, id: String, filename: String, data_base64: String, folder: String) -> Result<(), String> {
+    send(&state, ClientRequest::UploadModPackwiz { id, filename, data_base64, folder }).await
+}
+#[tauri::command]
+pub async fn publish_packwiz(state: tauri::State<'_, AppState>, id: String, pack_key: String) -> Result<(), String> {
+    send(&state, ClientRequest::PublishPackwiz { id, pack_key }).await
+}
+
+#[tauri::command]
+pub async fn list_packwiz_mods(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    send(&state, ClientRequest::ListPackwizMods { id }).await
+}
+
+#[tauri::command]
 pub async fn create_server(
     state: State<'_, AppState>,
     id: String,
