@@ -1,104 +1,205 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
+
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="css/base/globals.css" />
-  <link rel="stylesheet" href="css/layout/layout.css" />
-  <link rel="stylesheet" href="css/components/buttons.css" />
-  <link rel="stylesheet" href="css/components/forms.css" />
-  <link rel="stylesheet" href="css/components/modals.css" />
-  <link rel="stylesheet" href="css/components/terminal.css" />
-  <link rel="stylesheet" href="css/components/server-list.css" />
-  <title>Lumineria Manager</title>
-  <script type="module" src="js/main.js" defer></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lumineria Server Manager</title>
+
+    <!-- Rutas corregidas hacia los CSS -->
+    <link rel="stylesheet" href="css/base/globals.css">
+    <link rel="stylesheet" href="css/layout/layout.css">
+    <link rel="stylesheet" href="css/components/sidebar.css">
+    <link rel="stylesheet" href="css/components/buttons.css">
+    <link rel="stylesheet" href="css/components/cards.css">
+    <link rel="stylesheet" href="css/components/modals.css">
+    <link rel="stylesheet" href="css/components/terminal.css">
+    <link rel="stylesheet" href="css/components/tabs.css">
+
+    <!-- Ruta corregida hacia el JS principal -->
+    <script type="module" src="js/main.js" defer></script>
 </head>
+
 <body>
-  <div class="container">
-    <h1>Lumineria Manager</h1>
+    <div class="launcher-container">
+        <aside class="sidebar">
+            <div class="logo">LUMINERIA<br><span style="font-size: 0.5em; color: #a6e3a1;">SERVER MANAGER</span></div>
+            <ul class="game-list">
+                <li class="active" id="btn-nav-local">💻 Agente Local</li>
+                <li id="btn-nav-remote">🌐 Agente Remoto</li>
+            </ul>
+            <button id="btn-new-server" class="primary-btn"
+                style="margin: 20px; font-size: 0.9rem; padding: 10px; background-color: #a6e3a1; color: #11111b;">+
+                Crear Servidor</button>
 
-    <div class="tabs">
-      <button id="tab-local" class="active">Modo Local</button>
-      <button id="tab-remote">Modo Remoto</button>
-      <button id="tab-new" style="margin-left: auto; background-color: #a6e3a1;">+ Creador de Servidor</button>
+            <div class="sidebar-footer">
+                <div class="account-row">
+                    <div class="account-btn" style="cursor: default;">
+                        <span id="connection-status-dot" style="color: #f38ba8;">●</span>
+                        <span id="status-panel">Desconectado</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <main class="content">
+            <!-- VISTA: CONEXIÓN -->
+            <div id="view-connection" class="view-section active">
+                <div class="hero">
+                    <h1 id="conn-title">Modo Local</h1>
+                    <p id="conn-subtitle">Inicia el agente en tu propia máquina.</p>
+
+                    <div id="local-setup" style="margin-top: 20px;">
+                        <button id="btn-pick-folder" class="secondary-btn">📂 Elegir Carpeta de Servidores</button>
+                        <p id="folder-path" style="font-family: monospace; color: #a6e3a1; margin: 10px 0;">Ninguna
+                            seleccionada</p>
+                        <button id="btn-start-local" class="primary-btn" disabled>Iniciar y Conectar</button>
+                    </div>
+
+                    <div id="remote-setup" class="hidden" style="margin-top: 20px;">
+                        <input type="text" id="input-url" placeholder="ws://tuvps:8080/ws"
+                            style="width: 300px; padding: 10px; border-radius: 5px; border: none;">
+                        <button id="btn-connect-remote" class="primary-btn">Conectar</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- VISTA: LISTA DE SERVIDORES (GRID) -->
+            <div id="view-grid" class="view-section hidden">
+                <div class="hero">
+                    <h1>Tus Servidores</h1>
+                    <button id="btn-refresh-list" class="secondary-btn" style="margin-bottom: 15px;">↻ Actualizar
+                        Lista</button>
+                    <div id="server-grid" class="profiles-grid"></div>
+                </div>
+            </div>
+
+            <!-- VISTA: DETALLES DEL SERVIDOR -->
+            <div id="view-server-detail" class="view-section hidden">
+                <div class="instance-header">
+                    <button id="btn-back-grid" class="secondary-btn">← Volver</button>
+                    <h1 id="detail-title">Nombre del Servidor</h1>
+                    <span id="detail-badge" class="badge"
+                        style="margin-left: 10px; background: #cba6f7; color: #11111b; padding: 4px 8px; border-radius: 4px; font-weight: bold;">Paper
+                        1.20.1</span>
+                </div>
+
+                <div class="instance-controls" style="display: flex; gap: 10px; margin: 20px 0; align-items: center;">
+                    <button id="btn-detail-start" class="primary-btn"
+                        style="background-color: #a6e3a1; color: #11111b;">▶ Iniciar</button>
+                    <button id="btn-detail-stop" class="primary-btn"
+                        style="background-color: #f38ba8; color: #11111b;">■ Detener</button>
+                    <button id="btn-detail-restart" class="secondary-btn">↻ Reiniciar</button>
+                    <span id="detail-status-text" style="margin-left: auto; color: #a6e3a1;">Detenido</span>
+                </div>
+
+                <!-- PESTAÑAS -->
+                <div class="instance-tabs"
+                    style="display: flex; gap: 10px; border-bottom: 2px solid #45475a; margin-bottom: 20px;">
+                    <button class="tab-btn active" data-tab="tab-console">Terminal</button>
+                    <button class="tab-btn" data-tab="tab-packwiz">Mods (Packwiz)</button>
+                    <button class="tab-btn" data-tab="tab-config">Configuración</button>
+                    <button id="btn-detail-delete" class="secondary-btn"
+                        style="margin-left: auto; color: #f38ba8; border-color: #f38ba8;">🗑 Eliminar</button>
+                </div>
+
+                <!-- CONTENIDO PESTAÑAS -->
+                <div class="instance-tab-content">
+                    <div id="tab-console" class="tab-pane active">
+                        <div id="log-container" class="terminal" style="height: 450px;"></div>
+                    </div>
+
+                    <div id="tab-packwiz" class="tab-pane hidden">
+                        <div style="background: #313244; padding: 20px; border-radius: 8px;">
+                            <h3 style="margin-top:0; color: #89b4fa;">Inteligencia de Mods (Packwiz)</h3>
+                            <p style="color: #cdd6f4; font-size: 0.9em; margin-bottom: 15px;">Pega el enlace directo a
+                                tu archivo <code>pack.toml</code> para sincronizar automáticamente todos los mods,
+                                configuraciones y resourcepacks.</p>
+
+                            <div style="display: flex; gap: 10px;">
+                                <input type="text" id="packwiz-url-input"
+                                    placeholder="https://raw.githubusercontent.com/tu/repo/main/pack.toml"
+                                    style="flex: 1;">
+                                <button id="btn-sync-packwiz" class="primary-btn">Sincronizar Mods</button>
+                            </div>
+
+                            <div id="packwiz-results"
+                                style="margin-top: 20px; max-height: 300px; overflow-y: auto; background: #1e1e2e; padding: 10px; border-radius: 5px;">
+                                <p style="color: #6c7086; text-align: center;">El historial de sincronización aparecerá
+                                    aquí.</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="tab-config" class="tab-pane hidden">
+                        <div style="background: #313244; padding: 20px; border-radius: 8px;">
+                            <p><i>La edición de configuraciones se implementará pronto. Puedes abrir la carpeta
+                                    manualmente por ahora.</i></p>
+                            <button id="btn-open-folder" class="secondary-btn">📂 Abrir carpeta del servidor</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
     </div>
 
-    <!-- Modal Creador -->
-    <div id="creator-modal" class="modal" style="display: none;">
-      <div class="modal-content">
-        <h2>Crear Nuevo Servidor</h2>
-        <label>Nombre del Servidor</label>
-        <input type="text" id="new-name" placeholder="smp-mods" />
+    <!-- MODAL DE CREACIÓN -->
+    <div id="creator-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Crear Nuevo Servidor</h2>
 
-        <label>Motor</label>
-        <select id="new-type">
-          <option value="paper">PaperMC (Spigot/Paper)</option>
-          <option value="velocity">Velocity Proxy</option>
-          <option value="fabric">Fabric</option>
-          <option value="neoforge">NeoForge</option>
-          <option value="forge">Forge</option>
-        </select>
+            <label>Nombre del Servidor</label>
+            <input type="text" id="new-name" placeholder="smp-mods" />
 
-        <label id="version-lbl">Versión de Minecraft</label>
-        <select id="new-version">
-          <option value="1.21.1">1.21.1</option>
-          <option value="1.20.1">1.20.1</option>
-          <option value="1.19.2">1.19.2</option>
-        </select>
+            <label>Motor</label>
+            <select id="new-type">
+                <option value="paper">PaperMC (Spigot/Paper)</option>
+                <option value="velocity">Velocity Proxy</option>
+                <option value="fabric">Fabric</option>
+                <option value="neoforge">NeoForge</option>
+                <option value="forge">Forge</option>
+            </select>
 
-        <label id="loader-lbl">Versión del Cargador (Loader)</label>
-        <select id="new-loader"></select>
+            <label id="version-lbl">Versión de Minecraft</label>
+            <select id="new-version">
+                <option value="1.21.1">1.21.1</option>
+            </select>
 
-        <h3 style="margin-top: 15px;">Parámetros Extras (Guardados localmente)</h3>
-        <label>Puerto del Servidor</label>
-        <input type="number" id="new-port" value="25565" />
+            <label id="loader-lbl" style="display:none;">Versión del Cargador (Loader)</label>
+            <select id="new-loader" style="display:none;"></select>
 
-        <label>RAM Mínima / Máxima</label>
-        <div style="display: flex; gap: 10px;">
-          <input type="text" id="new-min-ram" value="1G" />
-          <input type="text" id="new-max-ram" value="4G" />
+            <h3 style="margin-top: 15px;">Parámetros Extras</h3>
+            <label>Puerto del Servidor</label>
+            <input type="number" id="new-port" value="25565" />
+
+            <label>RAM Mínima / Máxima</label>
+            <div style="display: flex; gap: 10px;">
+                <input type="text" id="new-min-ram" value="1G" />
+                <input type="text" id="new-max-ram" value="4G" />
+            </div>
+
+            <label style="display: block; margin-top: 10px;">
+                <input type="checkbox" id="new-online-mode" /> Online Mode (Cuentas Premium)
+            </label>
+
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="btn-submit-create" class="primary-btn" style="flex: 1;">Crear e Instalar</button>
+                <button id="btn-cancel-create" class="secondary-btn"
+                    style="background-color: #f38ba8;">Cancelar</button>
+            </div>
         </div>
-
-        <label style="display: block; margin-top: 10px;">
-          <input type="checkbox" id="new-online-mode" /> Online Mode (Cuentas Premium)
-        </label>
-
-        <div style="margin-top: 20px; display: flex; gap: 10px;">
-          <button id="btn-submit-create" style="flex: 1;">Crear e Instalar</button>
-          <button id="btn-cancel-create" style="background-color: #f38ba8;">Cancelar</button>
+    </div>
+    <div id="confirm-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2 id="confirm-modal-title">Confirmar acción</h2>
+            <p id="confirm-modal-message" style="white-space: pre-line; color: #cdd6f4;"></p>
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button id="btn-confirm-yes" class="primary-btn" style="flex:1; background-color:#f38ba8;">Sí,
+                    eliminar</button>
+                <button id="btn-confirm-no" class="secondary-btn" style="flex:1;">Cancelar</button>
+            </div>
         </div>
-      </div>
     </div>
-
-    <!-- Modal Logs/Terminal -->
-    <div id="logs-modal" class="modal" style="display: none;">
-      <div class="modal-content" style="max-width: 800px; width: 95%;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <h2 style="margin: 0;">Terminal: <span id="log-server-name"></span></h2>
-          <button id="btn-close-logs" style="background-color: #f38ba8;">Cerrar</button>
-        </div>
-        <div id="log-container" class="terminal"></div>
-      </div>
-    </div>
-
-    <div id="view-local" class="view active">
-      <p>Inicia el agente en tu propia máquina.</p>
-      <button id="btn-pick-folder">Elegir Carpeta de Servidores</button>
-      <p id="folder-path" class="path-text">Ninguna carpeta seleccionada</p>
-      <button id="btn-start-local" disabled>Iniciar y Conectar</button>
-    </div>
-
-    <div id="view-remote" class="view" style="display: none;">
-      <p>Conéctate a un VPS remoto (ej: ws://tuserver:8080/ws)</p>
-      <input type="text" id="input-url" placeholder="ws://127.0.0.1:8756/ws" />
-      <button id="btn-connect-remote">Conectar</button>
-    </div>
-
-    <div id="status-panel">Estado: Desconectado</div>
-    <p id="install-progress-lbl" style="color: #fab387; font-weight: bold;"></p>
-
-    <h2>Servidores <button id="btn-refresh-list" style="font-size: 0.8em; padding: 4px 10px;">↻ Actualizar</button></h2>
-    <ul id="server-list"></ul>
-  </div>
 </body>
+
 </html>

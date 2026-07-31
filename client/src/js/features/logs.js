@@ -35,13 +35,11 @@ export function appendLine(text) {
 
 export async function openLogs(id) {
     currentLogServerId = id;
-    document.getElementById('log-server-name').innerText = id;
     lines = [];
     pending = [];
     const container = document.getElementById('log-container');
     if (container) container.textContent = '';
 
-    document.getElementById('logs-modal').style.display = 'flex';
     await invoke('subscribe_logs', { id });
 }
 
@@ -50,12 +48,10 @@ export async function closeLogs() {
         await invoke('unsubscribe_logs', { id: currentLogServerId });
         currentLogServerId = null;
     }
-    document.getElementById('logs-modal').style.display = 'none';
     lines = [];
     pending = [];
 }
 
 export function initLogs() {
-    document.getElementById('btn-close-logs').onclick = closeLogs;
-    window.openLogs = openLogs;
+
 }

@@ -1,6 +1,7 @@
 import { invoke } from '../core/tauri.js';
 import { updateStatus } from '../ui/serverList.js';
 import { STATE } from '../core/state.js';
+import { showConfirm } from '../ui/confirmModal.js';
 
 export async function invoke_ws_action(payload) {
     if (payload.type === "list_servers") await invoke('list_servers');
@@ -26,18 +27,25 @@ export async function sendAction(type, id) {
 }
 
 export async function confirmDelete(id) {
-    if (confirm(`¿Estás seguro de eliminar el servidor '${id}'?\nEsta acción BORRARÁ TODO (Mundos, Plugins, Logs y el Contenedor) y no se puede revertir.`)) {
-        updateStatus("Eliminando servidor...", "#f38ba8");
-        try {
-            await invoke('delete_server', { id });
-        } catch (e) {
-            alert("Error: " + e);
-        }
+    const confirmed = await showConfirm(
+        `¿Estás seguro de eliminar el servidor '${id}'?\nEsta acción BORRARÁ TODO (Mundos, Plugins, Logs y el Contenedor) y no se puede revertir.`,
+        'Eliminar servidor'
+    );
+    if (!confirmed) return false;
+
+    updateStatus("Eliminando servidor...", "#f38ba8");
+    try {
+        await invoke('delete_server', { id });
+        return true;
+    } catch (e) {
+        alert("Error: " + e);
+        return false;
     }
 }
 
 export async function openServerFolder(id) {
     if (STATE.selectedFolder) {
+        // Corregido para que reconozca correctamente la barra invertida en Windows
         const sep = STATE.selectedFolder.includes('\\') ? '\\' : '/';
         const fullPath = STATE.selectedFolder + sep + id;
         try {
@@ -50,7 +58,7 @@ export async function openServerFolder(id) {
     }
 }
 
-
+// Vinculación global para que el HTML pueda llamar las funciones
 window.sendAction = sendAction;
 window.confirmDelete = confirmDelete;
 window.openServerFolder = openServerFolder;

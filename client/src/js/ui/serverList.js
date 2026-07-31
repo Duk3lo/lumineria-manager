@@ -1,48 +1,49 @@
-import { sendAction, confirmDelete } from '../features/actions.js';
-import { openLogs } from '../features/logs.js';
-
-const STATUS_LABELS = {
-    running: 'En ejecución',
-    stopped: 'Detenido',
-    restarting: 'Reiniciando',
-    missing: 'Contenedor eliminado',
-    unknown: 'Desconocido',
-};
+import { openServerDetail } from './serverDetail.js';
 
 export function updateStatus(text, color) {
-    const status = document.getElementById('status-panel');
-    status.innerText = text;
-    status.style.backgroundColor = color;
+    const statusPanel = document.getElementById('status-panel');
+    const statusDot = document.getElementById('connection-status-dot');
+
+    if (statusPanel) statusPanel.innerText = text;
+    if (statusDot && color) statusDot.style.color = color;
 }
 
 export function renderServers(servers) {
-    const ul = document.getElementById('server-list');
-    ul.innerHTML = "";
-    servers.forEach(server => {
-        const li = document.createElement('li');
-        const isMissing = server.status === 'missing';
-        const statusLabel = STATUS_LABELS[server.status] || server.status;
+    const grid = document.getElementById('server-grid');
+    grid.innerHTML = "";
 
-        li.innerHTML = `
-        <div class="server-header">
-            <strong>${server.display_name}</strong>
-            <span>Tipo: ${server.server_type.toUpperCase()} | MC: ${server.mc_version} | Status: ${statusLabel}</span>
-        </div>
-        <div class="actions">
-            ${isMissing
-                ? `<button onclick="window.sendAction('recreate_container', '${server.id}')" style="background-color: #cba6f7;">Recrear Contenedor</button>
-                 <button onclick="window.confirmDelete('${server.id}')" style="background-color: #ed8796;">Eliminar</button>`
-                : `
-                <button onclick="window.sendAction('start_server', '${server.id}')" style="background-color: #a6e3a1;">Iniciar</button>
-                <button onclick="window.sendAction('stop_server', '${server.id}')" style="background-color: #f38ba8;">Detener</button>
-                <button onclick="window.sendAction('restart_server', '${server.id}')" style="background-color: #f9e2af;">Reiniciar</button>
-                <button onclick="window.openLogs('${server.id}')" style="background-color: #89dceb;">Terminal (Logs)</button>
-                ${(server.server_type === 'paper' || server.server_type === 'velocity') ?
-                    `<button onclick="window.sendAction('auto_update', '${server.id}')" style="background-color: #89b4fa;">Actualizar</button>` : ''}
-                <button onclick="window.confirmDelete('${server.id}')" style="background-color: #ed8796;">Eliminar</button>
-            `}
-        </div>
+    if (servers.length === 0) {
+        grid.innerHTML = `<p style="color: #a6adc8; grid-column: 1/-1; text-align:center;">No tienes servidores. ¡Crea uno nuevo!</p>`;
+        return;
+    }
+
+    servers.forEach(server => {
+        const card = document.createElement('div');
+        card.className = 'profile-card';
+
+        const isRunning = server.status === 'running';
+        const dotColor = isRunning ? '#a6e3a1' : '#f38ba8';
+
+        card.innerHTML = `
+            <div style="padding: 20px; background: #313244; border-radius: 10px; cursor: pointer; transition: 0.2s; border: 1px solid #45475a;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; font-size: 1.2rem; color: #cdd6f4;">${server.display_name}</h3>
+                    <span style="color: ${dotColor}; font-size: 1.2rem;">●</span>
+                </div>
+                <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+                    <span class="badge" style="background: #45475a; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">${server.server_type.toUpperCase()}</span>
+                    <span class="badge" style="background: #45475a; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem;">MC: ${server.mc_version}</span>
+                </div>
+            </div>
         `;
-        ul.appendChild(li);
+
+        card.addEventListener('click', () => {
+            openServerDetail(server);
+        });
+
+        card.onmouseover = () => card.firstElementChild.style.borderColor = '#cba6f7';
+        card.onmouseout = () => card.firstElementChild.style.borderColor = '#45475a';
+
+        grid.appendChild(card);
     });
 }

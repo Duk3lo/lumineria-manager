@@ -9,6 +9,11 @@ export async function connectAgent(url) {
         await invoke('connect_agent', { url });
         updateStatus("Conectado", "#a6e3a1");
         invoke_ws_action({ type: "list_servers" });
+
+
+        document.getElementById('view-connection').classList.add('hidden');
+        document.getElementById('view-grid').classList.remove('hidden');
+
         return true;
     } catch (e) {
         updateStatus("Fallo de conexión: " + e, "#f38ba8");

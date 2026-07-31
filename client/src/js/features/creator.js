@@ -141,23 +141,28 @@ export async function submitCreateServer() {
         enforce_secure_profile: !onlineMode,
     };
 
-    document.getElementById('creator-modal').style.display = 'none';
+    document.getElementById('creator-modal').classList.add('hidden');
     updateStatus("Instalando servidor en segundo plano...", "#fab387");
-
     invoke_ws_action({ type: "create_server", id: server_id, config: config });
 }
 
 export function initCreator() {
-    document.getElementById('tab-new').onclick = async () => {
-        document.getElementById('creator-modal').style.display = 'flex';
+    document.getElementById('btn-new-server').onclick = async () => {
+        document.getElementById('creator-modal').classList.remove('hidden');
         await updateVersions();
         await updateLoaders();
     };
-    document.getElementById('btn-cancel-create').onclick = () => document.getElementById('creator-modal').style.display = 'none';
+
+
+    document.getElementById('btn-cancel-create').onclick = () => {
+        document.getElementById('creator-modal').classList.add('hidden');
+    };
+
     document.getElementById('new-type').onchange = async () => {
         await updateVersions();
         await updateLoaders();
     };
+
     document.getElementById('new-version').onchange = updateLoaders;
     document.getElementById('btn-submit-create').onclick = submitCreateServer;
 }

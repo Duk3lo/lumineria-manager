@@ -1,0 +1,61 @@
+.sidebar {
+    width: 260px;
+    background-color: #181825;
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid #313244;
+    flex-shrink: 0;
+}
+
+.logo {
+    padding: 30px 20px;
+    font-size: 1.5rem;
+    font-weight: 900;
+    letter-spacing: 2px;
+    color: #cba6f7;
+    line-height: 1.2;
+}
+
+/* Lista de navegación */
+.game-list {
+    list-style: none;
+    /* Quita los puntos */
+    padding: 0;
+    margin: 0;
+    flex-grow: 1;
+}
+
+.game-list li {
+    padding: 15px 20px;
+    cursor: pointer;
+    color: #a6adc8;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    border-left: 4px solid transparent;
+}
+
+.game-list li:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+    color: #cdd6f4;
+}
+
+.game-list li.active {
+    background-color: rgba(137, 180, 250, 0.1);
+    color: #89b4fa;
+    border-left: 4px solid #89b4fa;
+}
+
+/* Zona inferior de la barra */
+.sidebar-footer {
+    padding: 20px;
+    border-top: 1px solid #313244;
+}
+
+.account-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: #cdd6f4;
+    font-weight: bold;
+    font-size: 0.9rem;
+}

@@ -1,0 +1,34 @@
+.instance-tabs {
+    display: flex;
+    gap: 5px;
+    border-bottom: 2px solid #45475a;
+    padding-bottom: 5px;
+    margin-bottom: 20px;
+}
+
+.tab-btn {
+    background: transparent;
+    color: #a6adc8;
+    border: none;
+    padding: 10px 20px;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    border-radius: 8px 8px 0 0;
+    transition: all 0.2s ease;
+}
+
+.tab-btn:hover {
+    color: #cdd6f4;
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-btn.active {
+    color: #89b4fa;
+    background: rgba(137, 180, 250, 0.1);
+    border-bottom: 3px solid #89b4fa;
+}
+
+.tab-pane.hidden {
+    display: none;
+}

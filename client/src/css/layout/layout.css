@@ -1,17 +1,35 @@
-.tabs {
+/* Contenedor principal a pantalla completa */
+.launcher-container {
     display: flex;
-    gap: 10px;
-    margin-bottom: 20px;
+    height: 100vh;
+    width: 100vw;
+    background-color: #11111b; /* Fondo oscuro base */
+    overflow: hidden;
 }
 
-.view {
-    background-color: #313244;
-    padding: 20px;
-    border-radius: 10px;
+/* El área de la derecha donde cambian las pantallas */
+.content {
+    flex-grow: 1;
+    padding: 40px;
+    background-color: #1e1e2e;
+    overflow-y: auto;
+    position: relative;
 }
 
-.actions {
+/* Las vistas (Modo local, Grid, Detalles) */
+.view-section {
     display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 20px;
+    animation: fadeIn 0.3s ease;
+}
+
+/* La clase mágica que oculta las cosas */
+.hidden {
+    display: none !important;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(5px); }
+    to { opacity: 1; transform: translateY(0); }
 }
