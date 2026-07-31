@@ -1,5 +1,5 @@
-use crate::{config_writer, installer};
-use crate::{podman, servers};
+use crate::docker::{discovery, podman};
+use crate::installer::{config, installer};
 use anyhow::Result;
 use axum::{
     extract::{
@@ -28,11 +28,9 @@ pub async fn serve(root: PathBuf, bind: String) -> Result<()> {
     let state = AppState {
         root: Arc::new(root),
     };
-
     let app = Router::new()
         .route("/ws", get(ws_handler))
         .with_state(state);
-
     tracing::info!("Agente escuchando en {bind} (recordá: solo detrás de un túnel SSH)");
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     axum::serve(listener, app).await?;
@@ -45,7 +43,6 @@ async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
     let (mut sink, mut stream) = socket.split();
-
     let (tx, mut rx) = mpsc::unbounded_channel::<ServerEvent>();
 
     let writer_task = tokio::spawn(async move {
@@ -63,7 +60,6 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     while let Some(Ok(msg)) = stream.next().await {
         let Message::Text(text) = msg else { continue };
-
         let request: ClientRequest = match serde_json::from_str(&text) {
             Ok(r) => r,
             Err(e) => {
@@ -73,7 +69,6 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 continue;
             }
         };
-
         handle_request(request, &state, &tx, &mut log_tasks).await;
     }
 
@@ -90,7 +85,7 @@ async fn handle_request(
     log_tasks: &mut HashMap<String, JoinHandle<()>>,
 ) {
     match request {
-        ClientRequest::ListServers => match servers::discover(&state.root) {
+        ClientRequest::ListServers => match discovery::discover(&state.root) {
             Ok(list) => {
                 let _ = tx.send(ServerEvent::Servers { servers: list });
             }
@@ -100,7 +95,6 @@ async fn handle_request(
                 });
             }
         },
-
         ClientRequest::StartServer { id } => {
             run_action(tx, &id, podman::container_action("start", &id).await)
         }
@@ -111,7 +105,6 @@ async fn handle_request(
             run_action(tx, &id, podman::container_action("restart", &id).await)
         }
         ClientRequest::SyncMods { id } => run_action(tx, &id, podman::sync_mods_now(&id).await),
-
         ClientRequest::StartStack => run_action(
             tx,
             "stack",
@@ -127,7 +120,6 @@ async fn handle_request(
             "stack",
             podman::run_stack_script(&state.root, "restart-podman.sh").await,
         ),
-
         ClientRequest::SubscribeLogs { id } => {
             if log_tasks.contains_key(&id) {
                 return;
@@ -139,7 +131,6 @@ async fn handle_request(
                     tracing::warn!("stream_logs terminó con error: {e}");
                 }
             });
-
             let event_tx = tx.clone();
             let event_id = id.clone();
             let handle = tokio::spawn(async move {
@@ -157,16 +148,14 @@ async fn handle_request(
             });
             log_tasks.insert(id, handle);
         }
-
         ClientRequest::UnsubscribeLogs { id } => {
             if let Some(handle) = log_tasks.remove(&id) {
                 handle.abort();
             }
         }
-        ClientRequest::CreateServer { id, config } => {
+        ClientRequest::CreateServer { id, config: cfg } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
-
             tokio::spawn(async move {
                 let dest_dir = root_clone.join(&id);
                 if let Err(e) = fs::create_dir_all(&dest_dir).await {
@@ -175,18 +164,14 @@ async fn handle_request(
                     });
                     return;
                 }
-
                 let client = reqwest::Client::new();
                 let _ = tx_clone.send(ServerEvent::InstallProgress {
                     id: id.clone(),
                     step: "Iniciando instalación".into(),
                     percentage: 5,
                 });
-
-                if config_writer::write_server_env(&dest_dir, &config)
-                    .await
-                    .is_err()
-                    || config_writer::write_server_properties(&dest_dir, &config)
+                if config::write_server_env(&dest_dir, &cfg).await.is_err()
+                    || config::write_server_properties(&dest_dir, &cfg)
                         .await
                         .is_err()
                 {
@@ -195,39 +180,36 @@ async fn handle_request(
                     });
                     return;
                 }
-                let eula_path = dest_dir.join("eula.txt");
-                let _ = tokio::fs::write(&eula_path, "eula=true\n").await;
-
-                let result = match config.server_type.as_str() {
+                let _ = tokio::fs::write(dest_dir.join("eula.txt"), "eula=true\n").await;
+                let result = match cfg.server_type.as_str() {
                     "paper" | "velocity" | "folia" => installer::install_papermc(
                         &client,
-                        &config.server_type,
-                        &config.mc_version,
+                        &cfg.server_type,
+                        &cfg.mc_version,
                         &dest_dir,
                         &id,
                         &tx_clone,
-                        &config.min_ram,
-                        &config.max_ram,
+                        &cfg.min_ram,
+                        &cfg.max_ram,
                     )
                     .await
                     .map(|_| ()),
-
                     "fabric" => {
-                        let loader = config.loader_version.clone().unwrap_or_default();
+                        let loader = cfg.loader_version.clone().unwrap_or_default();
                         installer::install_fabric(
                             &client,
-                            &config.mc_version,
+                            &cfg.mc_version,
                             &loader,
                             &dest_dir,
                             &id,
                             &tx_clone,
-                            &config.min_ram,
-                            &config.max_ram,
+                            &cfg.min_ram,
+                            &cfg.max_ram,
                         )
                         .await
                     }
                     "neoforge" => {
-                        let loader = config.loader_version.clone().unwrap_or_default();
+                        let loader = cfg.loader_version.clone().unwrap_or_default();
                         let url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar", loader);
                         installer::install_mod_installer(
                             &client,
@@ -236,13 +218,13 @@ async fn handle_request(
                             &dest_dir,
                             &id,
                             &tx_clone,
-                            &config.min_ram,
-                            &config.max_ram,
+                            &cfg.min_ram,
+                            &cfg.max_ram,
                         )
                         .await
                     }
                     "forge" => {
-                        let loader = config.loader_version.clone().unwrap_or_default();
+                        let loader = cfg.loader_version.clone().unwrap_or_default();
                         let url = format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{0}/forge-{0}-installer.jar", loader);
                         installer::install_mod_installer(
                             &client,
@@ -251,44 +233,40 @@ async fn handle_request(
                             &dest_dir,
                             &id,
                             &tx_clone,
-                            &config.min_ram,
-                            &config.max_ram,
+                            &cfg.min_ram,
+                            &cfg.max_ram,
                         )
                         .await
                     }
                     _ => Ok(()),
                 };
-
                 if let Err(e) = result {
                     let _ = tx_clone.send(ServerEvent::Error {
                         message: format!("Error de instalación: {e}"),
                     });
                     return;
                 }
-
                 let _ = tx_clone.send(ServerEvent::InstallProgress {
                     id: id.clone(),
                     step: "Creando contenedor".into(),
                     percentage: 90,
                 });
-
-                let image = podman::java_image_for(&config.server_type, &config.mc_version);
-                match podman::create_container(&id, &dest_dir, config.port, image).await {
+                let image = podman::java_image_for(&cfg.server_type, &cfg.mc_version);
+                match podman::create_container(&id, &dest_dir, cfg.port, image).await {
                     Ok(()) => {
                         let _ = tx_clone.send(ServerEvent::Ack {
                             ok: true,
-                            message: Some("Instalado y contenedor creado exitosamente".into()),
+                            message: Some("Instalado exitosamente".into()),
                         });
                     }
                     Err(e) => {
                         let _ = tx_clone.send(ServerEvent::Error {
-                            message: format!("Se instaló pero no pude crear el contenedor: {e}"),
+                            message: format!("Error: {e}"),
                         });
                     }
                 }
             });
         }
-
         ClientRequest::AutoUpdateServer { id } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
@@ -384,9 +362,9 @@ async fn handle_request(
                 match result {
                     Ok(()) => {
                         let _ = tx_clone.send(ServerEvent::Ack {
-                    ok: true,
-                    message: Some("Motor actualizado. El jar nuevo se usará al reiniciar el servidor.".into()),
-                });
+                            ok: true,
+                            message: Some("Motor actualizado. Se usará al reiniciar.".into()),
+                        });
                     }
                     Err(e) => {
                         let _ = tx_clone.send(ServerEvent::Error {
@@ -408,7 +386,7 @@ async fn handle_request(
                     Ok(d) => d,
                     Err(_) => {
                         let _ = tx_clone.send(ServerEvent::Error {
-                            message: "No encontré la configuración de esta instancia.".into(),
+                            message: "No encontré la configuración.".into(),
                         });
                         return;
                     }
@@ -451,8 +429,8 @@ async fn handle_request(
 
                 if !dest_dir.join("start.sh").exists() {
                     let _ = tx_clone.send(ServerEvent::Error {
-                message: "Falta start.sh — usá Auto-Update Build para reinstalar el motor antes de recrear.".into(),
-            });
+                        message: "Falta start.sh — reinstala el motor antes de recrear.".into(),
+                    });
                     return;
                 }
 
@@ -466,7 +444,7 @@ async fn handle_request(
                     }
                     Err(e) => {
                         let _ = tx_clone.send(ServerEvent::Error {
-                            message: format!("No pude recrear el contenedor: {e}"),
+                            message: format!("Error: {e}"),
                         });
                     }
                 }
@@ -477,21 +455,17 @@ async fn handle_request(
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
-                // 1. Matar contenedor y revisar si hubo error
+                // AQUÍ ES DONDE SE USA LA FUNCIÓN QUE TE MARCABA EL WARNING
                 if let Err(e) = podman::delete_container(&id).await {
                     tracing::warn!("Problema al borrar contenedor {id}: {e}");
                 }
 
-                // 2. Eliminar la carpeta y su contenido del disco.
                 let dest_dir = root_clone.join(&id);
                 if dest_dir.exists() {
-                    // Intento 1: Borrado normal con Rust
                     if let Err(e) = tokio::fs::remove_dir_all(&dest_dir).await {
                         tracing::warn!(
                             "Fallo borrado normal de {id}: {e}. Intentando con podman unshare..."
                         );
-
-                        // Intento 2: Usar podman unshare por problemas de permisos de volumen rootless
                         let unshare_status = tokio::process::Command::new("podman")
                             .args(["unshare", "rm", "-rf", dest_dir.to_string_lossy().as_ref()])
                             .status()
@@ -499,7 +473,7 @@ async fn handle_request(
 
                         if unshare_status.is_err() || !unshare_status.unwrap().success() {
                             let _ = tx_clone.send(ServerEvent::Error {
-                                message: format!("El contenedor se borró, pero no se pudo borrar la carpeta por permisos. Bórrala a mano con sudo: {e}"),
+                                message: format!("El contenedor se borró, pero no la carpeta (requiere sudo): {e}"),
                             });
                             return;
                         }
@@ -514,6 +488,7 @@ async fn handle_request(
         }
     }
 }
+
 fn run_action(tx: &mpsc::UnboundedSender<ServerEvent>, id: &str, result: Result<()>) {
     let event = match result {
         Ok(()) => ServerEvent::Ack {

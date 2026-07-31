@@ -1,9 +1,7 @@
-mod deps;
-mod podman;
-mod servers;
-mod ws;
+mod api;
+mod docker;
 mod installer;
-mod config_writer;
+mod system;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -35,10 +33,10 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Command::CheckDeps { install } => deps::check_and_maybe_install(install)?,
+        Command::CheckDeps { install } => system::deps::check_and_maybe_install(install)?,
         Command::Serve { root, bind } => {
             let root = root.canonicalize()?;
-            ws::serve(root, bind).await?;
+            api::ws::serve(root, bind).await?;
         }
     }
 

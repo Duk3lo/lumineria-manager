@@ -1,0 +1,17 @@
+.tabs {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.view {
+    background-color: #313244;
+    padding: 20px;
+    border-radius: 10px;
+}
+
+.actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}

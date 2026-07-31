@@ -1,0 +1,13 @@
+.terminal {
+    background-color: #11111b;
+    color: #a6e3a1;
+    font-family: monospace;
+    height: 400px;
+    overflow-y: auto;
+    padding: 10px;
+    border-radius: 5px;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin-top: 15px;
+    font-size: 13px;
+}
