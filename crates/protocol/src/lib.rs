@@ -56,6 +56,9 @@ pub enum ClientRequest {
     UnsubscribeLogs {
         id: String,
     },
+    DeleteServer {
+        id: String,
+    },
     RecreateContainer {
         id: String,
     },

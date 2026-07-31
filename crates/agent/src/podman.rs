@@ -108,19 +108,48 @@ pub async fn create_container(id: &str, dest_dir: &Path, port: u16, image: &str)
     let status = Command::new("podman")
         .args([
             "create",
-            "--name", id,
-            "--network", "lumineria-net",
-            "-v", &volume,
-            "-p", &port_map,
-            "--restart", "unless-stopped",
+            "--name",
+            id,
+            "--network",
+            "lumineria-net",
+            "--userns=keep-id",
+            "-v",
+            &volume,
+            "-p",
+            &port_map,
+            "--restart",
+            "unless-stopped",
             image,
-            "sh", "/data/start.sh",
+            "sh",
+            "/data/start.sh",
         ])
         .status()
         .await?;
 
     if !status.success() {
         bail!("podman create falló para {id} (código {:?})", status.code());
+    }
+    Ok(())
+}
+
+pub async fn delete_container(container_id: &str) -> Result<()> {
+    let _ = Command::new("podman")
+        .args(["stop", "-t", "5", container_id])
+        .status()
+        .await;
+
+    let output = Command::new("podman")
+        .args(["rm", "-f", "-t", "0", container_id])
+        .output()
+        .await?;
+
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        if !err.to_lowercase().contains("no such container")
+            && !err.to_lowercase().contains("no container with name")
+        {
+            bail!("Error interno de Podman: {}", err.trim());
+        }
     }
     Ok(())
 }

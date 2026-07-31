@@ -7,6 +7,13 @@ let cachedNeoForge = [];
 let cachedForge = {};
 let cachedProjectVersions = {};
 
+// LOGS ENGINE VARIABLES
+let currentLogServerId = null;
+const MAX_LINES = 2000;
+let lines = [];
+let pending = [];
+let flushQueued = false;
+
 const STATUS_LABELS = {
   running: 'En ejecución',
   stopped: 'Detenido',
@@ -14,7 +21,6 @@ const STATUS_LABELS = {
   missing: 'Contenedor eliminado',
   unknown: 'Desconocido',
 };
-
 
 function mcVersionToNeoforgePrefix(mcVersion) {
   const parts = mcVersion.split('.');
@@ -35,7 +41,6 @@ async function ensureMojangVersions() {
         .filter(v => v.type === "release")
         .map(v => v.id);
     } catch (e) {
-      console.error("Error cargando el manifiesto de Mojang, usando fallback:", e);
       mojangVersionsCache = ['1.21.1', '1.20.1', '1.19.2', '1.18.2', '1.16.5'];
     }
   }
@@ -43,27 +48,16 @@ async function ensureMojangVersions() {
 
 async function ensureLoaderCacheForType(type) {
   if (type === 'forge' && Object.keys(cachedForge).length === 0) {
-    try {
-      cachedForge = await invoke('fetch_forge_versions');
-    } catch (e) {
-      console.error("Fallo al obtener Forge de Rust:", e);
-    }
+    try { cachedForge = await invoke('fetch_forge_versions'); } catch (e) { }
   }
   if (type === 'neoforge' && cachedNeoForge.length === 0) {
-    try {
-      cachedNeoForge = await invoke('fetch_neoforge_versions');
-    } catch (e) {
-      console.error("Fallo al obtener NeoForge de Rust:", e);
-    }
+    try { cachedNeoForge = await invoke('fetch_neoforge_versions'); } catch (e) { }
   }
 }
 
 function isMcVersionSupported(type, mcVersion) {
   if (type === 'paper' || type === 'velocity' || type === 'fabric') return true;
-
-  if (type === 'forge') {
-    return !!(cachedForge[mcVersion]?.length);
-  }
+  if (type === 'forge') return !!(cachedForge[mcVersion]?.length);
   if (type === 'neoforge') {
     if (cachedNeoForge.length === 0) return true;
     const prefix = mcVersionToNeoforgePrefix(mcVersion);
@@ -71,11 +65,11 @@ function isMcVersionSupported(type, mcVersion) {
   }
   return true;
 }
+
 async function updateVersions() {
   const type = document.getElementById('new-type').value;
   const versionSelect = document.getElementById('new-version');
   const versionLbl = document.getElementById('version-lbl');
-
   if (!versionSelect || !versionLbl) return;
 
   const PAPER_PROJECTS = ['paper', 'velocity', 'folia'];
@@ -95,12 +89,9 @@ async function updateVersions() {
   } else {
     versionLbl.innerText = 'Versión de Minecraft';
     versionSelect.innerHTML = "<option>Cargando lista inteligente...</option>";
-
     await ensureMojangVersions();
     await ensureLoaderCacheForType(type);
-
     const filteredVersions = mojangVersionsCache.filter(v => isMcVersionSupported(type, v));
-
     versionSelect.innerHTML = filteredVersions.map(v => `<option value="${v}">${v}</option>`).join('');
   }
 }
@@ -118,6 +109,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById('new-version').onchange = updateLoaders;
   document.getElementById('btn-submit-create').onclick = submitCreateServer;
   document.getElementById('btn-refresh-list').onclick = () => invoke_ws_action({ type: "list_servers" });
+  document.getElementById('btn-close-logs').onclick = closeLogs;
 
   document.getElementById('btn-pick-folder').onclick = async () => {
     selectedFolder = await invoke('pick_folder');
@@ -132,9 +124,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     try {
       const url = await invoke('start_local_agent', { rootPath: selectedFolder });
       const ok = await connectAgent(url);
-      if (ok) {
-        await invoke('save_last_connection', { mode: 'local', folder: selectedFolder, url: null });
-      }
+      if (ok) await invoke('save_last_connection', { mode: 'local', folder: selectedFolder, url: null });
     } catch (e) {
       updateStatus("Error: " + e, "#f38ba8");
     }
@@ -143,9 +133,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById('btn-connect-remote').onclick = async () => {
     const url = document.getElementById('input-url').value;
     const ok = await connectAgent(url);
-    if (ok) {
-      await invoke('save_last_connection', { mode: 'remote', folder: null, url });
-    }
+    if (ok) await invoke('save_last_connection', { mode: 'remote', folder: null, url });
   };
 
   await listen("server-event", (event) => {
@@ -155,12 +143,18 @@ document.addEventListener("DOMContentLoaded", async () => {
     } else if (data.type === "install_progress") {
       document.getElementById('install-progress-lbl').innerText = `[${data.percentage}%] ${data.step}`;
     } else if (data.type === "ack") {
+      updateStatus("Conectado", "#a6e3a1"); // <-- AÑADIR ESTA LÍNEA PARA RESETEAR EL TEXTO
       document.getElementById('install-progress-lbl').innerText = "";
       alert("Operación completada: " + (data.message || "OK"));
       invoke_ws_action({ type: "list_servers" });
     } else if (data.type === "error") {
+      updateStatus("Conectado", "#a6e3a1"); // <-- AÑADIR ESTA LÍNEA AQUÍ TAMBIÉN
       document.getElementById('install-progress-lbl').innerText = "";
       alert("Error: " + data.message);
+    } else if (data.type === "log_line") {
+      if (data.id === currentLogServerId) {
+        appendLine(data.line);
+      }
     }
   });
 
@@ -173,6 +167,75 @@ async function openCreatorModal() {
   await updateLoaders();
 }
 
+// BATCHED LOGS ENGINE
+function queueFlush() {
+  if (flushQueued) return;
+  flushQueued = true;
+  requestAnimationFrame(flush);
+}
+
+function flush() {
+  flushQueued = false;
+  if (pending.length === 0) return;
+
+  lines.push(...pending);
+  pending = [];
+
+  if (lines.length > MAX_LINES) {
+    lines = lines.slice(lines.length - MAX_LINES);
+  }
+
+  // Comprobar que el panel esté abierto y escribir todo el bloque de texto de golpe
+  const container = document.getElementById('log-container');
+  if (container && currentLogServerId) {
+    container.textContent = lines.join('\n') + '\n';
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+function appendLine(text) {
+  pending.push(text);
+  queueFlush();
+}
+
+window.openLogs = async function (id) {
+  currentLogServerId = id;
+  document.getElementById('log-server-name').innerText = id;
+
+  // Limpiar estados de memoria anteriores
+  lines = [];
+  pending = [];
+  const container = document.getElementById('log-container');
+  if (container) {
+    container.textContent = '';
+  }
+
+  document.getElementById('logs-modal').style.display = 'flex';
+  await invoke('subscribe_logs', { id });
+}
+
+async function closeLogs() {
+  if (currentLogServerId) {
+    await invoke('unsubscribe_logs', { id: currentLogServerId });
+    currentLogServerId = null;
+  }
+  document.getElementById('logs-modal').style.display = 'none';
+  lines = [];
+  pending = [];
+}
+
+// DELETE SYSTEM
+window.confirmDelete = async function (id) {
+  if (confirm(`¿Estás seguro de eliminar el servidor '${id}'?\nEsta acción BORRARÁ TODO (Mundos, Plugins, Logs y el Contenedor) y no se puede revertir.`)) {
+    updateStatus("Eliminando servidor...", "#f38ba8");
+    try {
+      await invoke('delete_server', { id });
+    } catch (e) {
+      alert("Error: " + e);
+    }
+  }
+}
+
 async function restoreLastConnection() {
   try {
     const last = await invoke('load_last_connection');
@@ -183,33 +246,21 @@ async function restoreLastConnection() {
       selectedFolder = last.folder;
       document.getElementById('folder-path').innerText = selectedFolder;
       document.getElementById('btn-start-local').disabled = false;
-      updateStatus("Reconectando a la última carpeta local...", "#f9e2af");
+      updateStatus("Reconectando...", "#f9e2af");
       try {
         const url = await invoke('start_local_agent', { rootPath: selectedFolder });
         await connectAgent(url);
       } catch (e) {
-        const msg = String(e);
-        if (msg.includes("ya no existe")) {
-          updateStatus("La carpeta registrada fue eliminada o movida. Elegí una nueva.", "#f38ba8");
-          selectedFolder = null;
-          document.getElementById('folder-path').innerText = "Ninguna carpeta seleccionada";
-          document.getElementById('btn-start-local').disabled = true;
-          await invoke('save_last_connection', { mode: 'local', folder: null, url: null });
-        } else {
-          updateStatus("Error al reconectar: " + e, "#f38ba8");
-        }
+        updateStatus("Error: " + e, "#f38ba8");
       }
     } else if (last.mode === 'remote' && last.url) {
       switchTab('remote');
       document.getElementById('input-url').value = last.url;
-      updateStatus("Reconectando al último servidor remoto...", "#f9e2af");
+      updateStatus("Reconectando...", "#f9e2af");
       await connectAgent(last.url);
     }
-  } catch (e) {
-    console.error("No pude cargar la última conexión:", e);
-  }
+  } catch (e) { }
 }
-
 
 async function updateLoaders() {
   const type = document.getElementById('new-type').value;
@@ -235,19 +286,13 @@ async function updateLoaders() {
     } catch (e) {
       loaderSelect.innerHTML = "<option value='0.15.11'>0.15.11 (Default)</option>";
     }
-  }
-
-  else if (type === 'neoforge') {
-    if (cachedNeoForge.length === 0) {
-      cachedNeoForge = await invoke('fetch_neoforge_versions');
-    }
+  } else if (type === 'neoforge') {
+    if (cachedNeoForge.length === 0) cachedNeoForge = await invoke('fetch_neoforge_versions');
     const prefix = mcVersionToNeoforgePrefix(version);
     const matches = cachedNeoForge.filter(v => v.startsWith(`${prefix}.`)).reverse();
     loaderSelect.innerHTML = matches.map(v => `<option value="${v}">${v}</option>`).join('');
   } else if (type === 'forge') {
-    if (Object.keys(cachedForge).length === 0) {
-      cachedForge = await invoke('fetch_forge_versions');
-    }
+    if (Object.keys(cachedForge).length === 0) cachedForge = await invoke('fetch_forge_versions');
     const matches = (cachedForge[version] || []).slice().reverse();
     loaderSelect.innerHTML = matches.map(v => {
       const label = v.startsWith(`${version}-`) ? v.slice(version.length + 1) : v;
@@ -269,7 +314,6 @@ async function submitCreateServer() {
   if (!name) return alert("Especifica un nombre");
 
   const server_id = name.toLowerCase().replace(/[^a-z0-9]/g, '-');
-
   const config = {
     display_name: name,
     server_type: type,
@@ -285,32 +329,19 @@ async function submitCreateServer() {
   document.getElementById('creator-modal').style.display = 'none';
   updateStatus("Instalando servidor en segundo plano...", "#fab387");
 
-  invoke_ws_action({
-    type: "create_server",
-    id: server_id,
-    config: config
-  });
+  invoke_ws_action({ type: "create_server", id: server_id, config: config });
 }
 
 async function connectAgent(url) {
-  const maxAttempts = 5;
-
-  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    updateStatus(`Conectando (Intento ${attempt}/${maxAttempts})...`, "#f9e2af");
-    try {
-      await invoke('connect_agent', { url });
-      updateStatus("Conectado", "#a6e3a1");
-      invoke_ws_action({ type: "list_servers" });
-      return true;
-    } catch (e) {
-      if (attempt === maxAttempts) {
-        updateStatus("Fallo de conexión definitivo: " + e, "#f38ba8");
-      } else {
-        await new Promise(resolve => setTimeout(resolve, 800));
-      }
-    }
+  try {
+    await invoke('connect_agent', { url });
+    updateStatus("Conectado", "#a6e3a1");
+    invoke_ws_action({ type: "list_servers" });
+    return true;
+  } catch (e) {
+    updateStatus("Fallo de conexión: " + e, "#f38ba8");
+    return false;
   }
-  return false;
 }
 
 async function invoke_ws_action(payload) {
@@ -341,13 +372,16 @@ function renderServers(servers) {
       </div>
       <div class="actions">
         ${isMissing
-          ? `<button onclick="sendAction('recreate_container', '${server.id}')" style="background-color: #cba6f7;">Recrear Contenedor</button>`
-          : `
+        ? `<button onclick="sendAction('recreate_container', '${server.id}')" style="background-color: #cba6f7;">Recrear Contenedor</button>
+             <button onclick="confirmDelete('${server.id}')" style="background-color: #ed8796;">Eliminar</button>`
+        : `
             <button onclick="sendAction('start_server', '${server.id}')" style="background-color: #a6e3a1;">Iniciar</button>
             <button onclick="sendAction('stop_server', '${server.id}')" style="background-color: #f38ba8;">Detener</button>
             <button onclick="sendAction('restart_server', '${server.id}')" style="background-color: #f9e2af;">Reiniciar</button>
+            <button onclick="openLogs('${server.id}')" style="background-color: #89dceb;">Terminal (Logs)</button>
             ${(server.server_type === 'paper' || server.server_type === 'velocity') ?
-              `<button onclick="sendAction('auto_update', '${server.id}')" style="background-color: #89b4fa;">Auto-Update Build</button>` : ''}
+          `<button onclick="sendAction('auto_update', '${server.id}')" style="background-color: #89b4fa;">Actualizar</button>` : ''}
+            <button onclick="confirmDelete('${server.id}')" style="background-color: #ed8796;">Eliminar</button>
           `}
       </div>
     `;
@@ -376,4 +410,21 @@ function switchTab(tab) {
   document.getElementById('view-remote').style.display = tab === 'remote' ? 'block' : 'none';
   document.getElementById('tab-local').classList.toggle('active', tab === 'local');
   document.getElementById('tab-remote').classList.toggle('active', tab === 'remote');
+}
+
+window.openServerFolder = async function (id) {
+  // Solo podemos abrir carpetas locales de forma sencilla
+  if (selectedFolder) {
+    // Si estás en Linux o Windows, unimos la ruta principal con el ID del servidor
+    const sep = selectedFolder.includes('\\') ? '\\' : '/';
+    const fullPath = selectedFolder + sep + id;
+
+    try {
+      await window.__TAURI__.core.invoke('open_folder_in_os', { path: fullPath });
+    } catch (e) {
+      alert("Error al abrir la carpeta: " + e);
+    }
+  } else {
+    alert("Para ver la carpeta debes estar conectado en 'Modo Local' con la ruta seleccionada.");
+  }
 }

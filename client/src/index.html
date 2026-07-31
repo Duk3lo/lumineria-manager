@@ -19,6 +19,7 @@
       <button id="tab-new" style="margin-left: auto; background-color: #a6e3a1;">+ Creador de Servidor</button>
     </div>
 
+    <!-- Modal Creador -->
     <div id="creator-modal" class="modal" style="display: none;">
       <div class="modal-content">
         <h2>Crear Nuevo Servidor</h2>
@@ -62,6 +63,17 @@
           <button id="btn-submit-create" style="flex: 1;">Crear e Instalar</button>
           <button id="btn-cancel-create" style="background-color: #f38ba8;">Cancelar</button>
         </div>
+      </div>
+    </div>
+
+    <!-- Modal Logs/Terminal -->
+    <div id="logs-modal" class="modal" style="display: none;">
+      <div class="modal-content" style="max-width: 800px; width: 95%;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <h2 style="margin: 0;">Terminal: <span id="log-server-name"></span></h2>
+          <button id="btn-close-logs" style="background-color: #f38ba8;">Cerrar</button>
+        </div>
+        <div id="log-container" class="terminal"></div>
       </div>
     </div>
 

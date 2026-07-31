@@ -57,28 +57,45 @@ async fn pick_folder(app: AppHandle) -> Result<Option<String>, String> {
     Ok(folder.map(|f| f.to_string()))
 }
 
+fn agent_pid_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("local_agent.pid"))
+}
+
 #[tauri::command]
 async fn start_local_agent(app: AppHandle, root_path: String) -> Result<String, String> {
     if !std::path::Path::new(&root_path).is_dir() {
-        return Err(format!(
-            "La carpeta registrada ya no existe (fue eliminada o movida): {root_path}"
-        ));
+        return Err(format!("La carpeta registrada ya no existe: {root_path}"));
+    }
+
+    // Matar cualquier agente de una corrida anterior (dev reload, crash, etc.)
+    let pid_path = agent_pid_path(&app)?;
+    if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
+        if let Ok(pid) = pid_str.trim().parse::<u32>() {
+            let _ = std::process::Command::new("kill")
+                .arg("-9")
+                .arg(pid.to_string())
+                .status();
+        }
     }
 
     let port = "127.0.0.1:8756";
-
-    let sidecar = app
-        .shell()
-        .sidecar("lumineria-agent")
+    let sidecar = app.shell().sidecar("lumineria-agent")
         .map_err(|e| e.to_string())?
         .args(["serve", "--root", &root_path, "--bind", port]);
 
-    let (mut rx, _child) = sidecar.spawn().map_err(|e| e.to_string())?;
+    let (mut rx, child) = sidecar.spawn().map_err(|e| e.to_string())?;
+    std::fs::write(&pid_path, child.pid().to_string()).map_err(|e| e.to_string())?;
 
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
-            if let tauri_plugin_shell::process::CommandEvent::Stdout(line) = event {
-                println!("[Agente Local] {}", String::from_utf8_lossy(&line));
+            match event {
+                tauri_plugin_shell::process::CommandEvent::Stdout(l) =>
+                    println!("[Agente Local] {}", String::from_utf8_lossy(&l)),
+                tauri_plugin_shell::process::CommandEvent::Stderr(l) =>
+                    eprintln!("[Agente Local ERROR] {}", String::from_utf8_lossy(&l)),
+                _ => {}
             }
         }
     });
@@ -92,11 +109,20 @@ async fn connect_agent(
     state: State<'_, AppState>,
     url: String,
 ) -> Result<(), String> {
-    let conn = agent_client::connect(app, url)
-        .await
-        .map_err(|e| e.to_string())?;
-    *state.connection.lock().await = Some(conn);
-    Ok(())
+    let mut last_err = String::new();
+    for _ in 0..15 {
+        match agent_client::connect(app.clone(), url.clone()).await {
+            Ok(conn) => {
+                *state.connection.lock().await = Some(conn);
+                return Ok(());
+            }
+            Err(e) => {
+                last_err = e.to_string();
+                tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            }
+        }
+    }
+    Err(format!("No pude conectar tras varios intentos: {last_err}"))
 }
 
 #[tauri::command]
@@ -229,6 +255,27 @@ async fn recreate_container(state: State<'_, AppState>, id: String) -> Result<()
     send(&state, ClientRequest::RecreateContainer { id }).await
 }
 
+#[tauri::command]
+async fn delete_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    send(&state, ClientRequest::DeleteServer { id }).await
+}
+
+#[tauri::command]
+async fn open_folder_in_os(path: String) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let command = "explorer";
+    #[cfg(target_os = "linux")]
+    let command = "xdg-open";
+    #[cfg(target_os = "macos")]
+    let command = "open";
+
+    std::process::Command::new(command)
+        .arg(&path)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -237,6 +284,8 @@ pub fn run() {
         .manage(AppState {
             connection: Mutex::new(None),
         })
+        
+
         .invoke_handler(tauri::generate_handler![
             pick_folder,
             start_local_agent,
@@ -256,6 +305,8 @@ pub fn run() {
             load_last_connection,
             save_last_connection,
             recreate_container,
+            delete_server,
+            open_folder_in_os
         ])
         .run(tauri::generate_context!())
         .expect("error corriendo la app de Tauri");

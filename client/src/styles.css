@@ -91,6 +91,7 @@ li {
 .actions {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap; /* Permitir que los botones no se amontonen y bajen a la siguiente fila */
 }
 
 /* Modal Styles */
@@ -115,4 +116,19 @@ li {
   width: 90%;
   max-height: 90vh;
   overflow-y: auto;
+}
+
+/* Estilo para la terminal */
+.terminal {
+  background-color: #11111b;
+  color: #a6e3a1;
+  font-family: monospace;
+  height: 400px;
+  overflow-y: auto;
+  padding: 10px;
+  border-radius: 5px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin-top: 15px;
+  font-size: 13px;
 }

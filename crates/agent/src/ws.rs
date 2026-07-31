@@ -195,6 +195,8 @@ async fn handle_request(
                     });
                     return;
                 }
+                let eula_path = dest_dir.join("eula.txt");
+                let _ = tokio::fs::write(&eula_path, "eula=true\n").await;
 
                 let result = match config.server_type.as_str() {
                     "paper" | "velocity" | "folia" => installer::install_papermc(
@@ -396,61 +398,120 @@ async fn handle_request(
         }
 
         ClientRequest::RecreateContainer { id } => {
-    let tx_clone = tx.clone();
-    let root_clone = state.root.clone();
-    tokio::spawn(async move {
-        let dest_dir = root_clone.join(&id);
-        let env_path = dest_dir.join("server.env");
+            let tx_clone = tx.clone();
+            let root_clone = state.root.clone();
+            tokio::spawn(async move {
+                let dest_dir = root_clone.join(&id);
+                let env_path = dest_dir.join("server.env");
 
-        let env_data = match fs::read_to_string(&env_path).await {
-            Ok(d) => d,
-            Err(_) => {
-                let _ = tx_clone.send(ServerEvent::Error {
-                    message: "No encontré la configuración de esta instancia.".into(),
-                });
-                return;
-            }
-        };
+                let env_data = match fs::read_to_string(&env_path).await {
+                    Ok(d) => d,
+                    Err(_) => {
+                        let _ = tx_clone.send(ServerEvent::Error {
+                            message: "No encontré la configuración de esta instancia.".into(),
+                        });
+                        return;
+                    }
+                };
 
-        let mut server_type = "paper".to_string();
-        let mut mc_version = "latest".to_string();
-        let mut port: u16 = 25565;
+                let mut server_type = "paper".to_string();
+                let mut mc_version = "latest".to_string();
+                let mut port: u16 = 25565;
 
-        for line in env_data.lines() {
-            if line.starts_with("SERVER_TYPE=") {
-                server_type = line.split('=').nth(1).unwrap_or("paper").replace('"', "").trim().to_string();
-            }
-            if line.starts_with("MC_VERSION=") {
-                mc_version = line.split('=').nth(1).unwrap_or("latest").replace('"', "").trim().to_string();
-            }
-            if line.starts_with("SERVER_PORT=") {
-                port = line.split('=').nth(1).unwrap_or("25565").replace('"', "").trim().parse().unwrap_or(25565);
-            }
-        }
+                for line in env_data.lines() {
+                    if line.starts_with("SERVER_TYPE=") {
+                        server_type = line
+                            .split('=')
+                            .nth(1)
+                            .unwrap_or("paper")
+                            .replace('"', "")
+                            .trim()
+                            .to_string();
+                    }
+                    if line.starts_with("MC_VERSION=") {
+                        mc_version = line
+                            .split('=')
+                            .nth(1)
+                            .unwrap_or("latest")
+                            .replace('"', "")
+                            .trim()
+                            .to_string();
+                    }
+                    if line.starts_with("SERVER_PORT=") {
+                        port = line
+                            .split('=')
+                            .nth(1)
+                            .unwrap_or("25565")
+                            .replace('"', "")
+                            .trim()
+                            .parse()
+                            .unwrap_or(25565);
+                    }
+                }
 
-        if !dest_dir.join("start.sh").exists() {
-            let _ = tx_clone.send(ServerEvent::Error {
+                if !dest_dir.join("start.sh").exists() {
+                    let _ = tx_clone.send(ServerEvent::Error {
                 message: "Falta start.sh — usá Auto-Update Build para reinstalar el motor antes de recrear.".into(),
             });
-            return;
+                    return;
+                }
+
+                let image = podman::java_image_for(&server_type, &mc_version);
+                match podman::create_container(&id, &dest_dir, port, image).await {
+                    Ok(()) => {
+                        let _ = tx_clone.send(ServerEvent::Ack {
+                            ok: true,
+                            message: Some("Contenedor recreado".into()),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx_clone.send(ServerEvent::Error {
+                            message: format!("No pude recrear el contenedor: {e}"),
+                        });
+                    }
+                }
+            });
         }
 
-        let image = podman::java_image_for(&server_type, &mc_version);
-        match podman::create_container(&id, &dest_dir, port, image).await {
-            Ok(()) => {
+        ClientRequest::DeleteServer { id } => {
+            let tx_clone = tx.clone();
+            let root_clone = state.root.clone();
+            tokio::spawn(async move {
+                // 1. Matar contenedor y revisar si hubo error
+                if let Err(e) = podman::delete_container(&id).await {
+                    tracing::warn!("Problema al borrar contenedor {id}: {e}");
+                }
+
+                // 2. Eliminar la carpeta y su contenido del disco.
+                let dest_dir = root_clone.join(&id);
+                if dest_dir.exists() {
+                    // Intento 1: Borrado normal con Rust
+                    if let Err(e) = tokio::fs::remove_dir_all(&dest_dir).await {
+                        tracing::warn!(
+                            "Fallo borrado normal de {id}: {e}. Intentando con podman unshare..."
+                        );
+
+                        // Intento 2: Usar podman unshare por problemas de permisos de volumen rootless
+                        let unshare_status = tokio::process::Command::new("podman")
+                            .args(["unshare", "rm", "-rf", dest_dir.to_string_lossy().as_ref()])
+                            .status()
+                            .await;
+
+                        if unshare_status.is_err() || !unshare_status.unwrap().success() {
+                            let _ = tx_clone.send(ServerEvent::Error {
+                                message: format!("El contenedor se borró, pero no se pudo borrar la carpeta por permisos. Bórrala a mano con sudo: {e}"),
+                            });
+                            return;
+                        }
+                    }
+                }
+
                 let _ = tx_clone.send(ServerEvent::Ack {
                     ok: true,
-                    message: Some("Contenedor recreado".into()),
+                    message: Some("Servidor y archivos eliminados exitosamente".into()),
                 });
-            }
-            Err(e) => {
-                let _ = tx_clone.send(ServerEvent::Error {
-                    message: format!("No pude recrear el contenedor: {e}"),
-                });
-            }
+            });
         }
-    });
-}
     }
 }
 fn run_action(tx: &mpsc::UnboundedSender<ServerEvent>, id: &str, result: Result<()>) {
