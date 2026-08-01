@@ -95,6 +95,11 @@ pub async fn write_packwiz_file(state: tauri::State<'_, AppState>, id: String, p
 }
 
 #[tauri::command]
+pub async fn update_server(state: State<'_, AppState>, id: String, loader_version: Option<String>) -> Result<(), String> {
+    send(&state, ClientRequest::UpdateServer { id, loader_version }).await
+}
+
+#[tauri::command]
 pub async fn delete_packwiz_file(state: tauri::State<'_, AppState>, id: String, path: String) -> Result<(), String> {
     send(&state, ClientRequest::DeleteFile { id, path }).await
 }

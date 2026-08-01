@@ -2,12 +2,12 @@ mod api;
 mod docker;
 mod installer;
 mod publisher;
-mod system;
 mod rcon;
+mod system;
 
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
 use std::path::Path;
+use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(
@@ -36,7 +36,16 @@ enum Command {
         vps_remote_base: String,
         #[arg(long, default_value = "localhost")]
         domain: String,
+        #[arg(long)]
+        token: Option<String>,
     },
+}
+
+fn generate_token() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 24];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 fn expand_tilde(path: &str) -> PathBuf {
@@ -75,15 +84,20 @@ async fn main() -> anyhow::Result<()> {
 
     match cli.command {
         Command::CheckDeps { install } => system::deps::check_and_maybe_install(install).await?,
+
         Command::Serve {
             root,
             bind,
             vps_ssh_host,
             vps_remote_base,
             domain,
+            token,
         } => {
             let root = root.canonicalize()?;
             let domain = normalize_base_url(&domain);
+            let token = token.unwrap_or_else(generate_token);
+            tracing::warn!("🔑 Token del agente: {token}");
+            tracing::warn!("   Conectá con: ws://host:puerto/ws?token={token}");
             let publish_target = match vps_ssh_host {
                 Some(host) => publisher::PublishTarget::Ssh {
                     ssh_host: host,
@@ -95,13 +109,12 @@ async fn main() -> anyhow::Result<()> {
                     web_root: PathBuf::from("/var/www/html"),
                 },
             };
-            api::ws::serve(root, bind, publish_target, domain).await?;
+            api::ws::serve(root, bind, publish_target, domain, token).await?;
         }
     }
 
     Ok(())
 }
-
 
 fn build_file_tree<'a>(
     base_dir: &'a Path,
@@ -118,9 +131,11 @@ fn build_file_tree<'a>(
         if let Ok(mut entries) = tokio::fs::read_dir(target).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
                 let name = entry.file_name().to_string_lossy().to_string();
-                
+
                 // Ocultamos la carpeta interna de git y el archivo temporal de packwiz si existen
-                if name == ".git" || name == "packwiz.exe" { continue; }
+                if name == ".git" || name == "packwiz.exe" {
+                    continue;
+                }
 
                 let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
                 let new_rel = if rel_path.is_empty() {
@@ -143,14 +158,14 @@ fn build_file_tree<'a>(
                 });
             }
         }
-        
+
         // Ordenar: Carpetas primero, luego orden alfabético
         nodes.sort_by(|a, b| match (a.is_dir, b.is_dir) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
             _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
         });
-        
+
         nodes
     })
 }

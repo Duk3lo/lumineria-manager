@@ -114,6 +114,7 @@ pub async fn install_fabric(
     tx: &mpsc::UnboundedSender<ServerEvent>,
     min_ram: &str,
     max_ram: &str,
+    image: &str,   // 👈 nuevo
 ) -> Result<()> {
     let response = client
         .get("https://meta.fabricmc.net/v2/versions/installer")
@@ -159,7 +160,7 @@ pub async fn install_fabric(
             "--userns=keep-id",
             "-v", &vol_data,
             "-w", "/data",
-            "docker.io/library/eclipse-temurin:21-jre",
+            image,
             "java",
             "-jar",
             "fabric-installer.jar",
@@ -201,6 +202,7 @@ pub async fn install_mod_installer(
     tx: &mpsc::UnboundedSender<ServerEvent>,
     min_ram: &str,
     max_ram: &str,
+    image: &str,   // 👈 nuevo
 ) -> Result<()> {
     let installer_path = dest_dir.join(installer_name);
     download_file(
@@ -229,7 +231,7 @@ pub async fn install_mod_installer(
             "--userns=keep-id",
             "-v", &vol_data,
             "-w", "/data",
-            "docker.io/library/eclipse-temurin:21-jre",
+            image,
             "java",
             "-jar",
             installer_name,

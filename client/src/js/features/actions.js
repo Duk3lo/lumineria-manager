@@ -99,6 +99,15 @@ export async function deleteFile(id, path) { await invoke('delete_packwiz_file',
 
 export async function createDirectory(id, path) { await invoke('create_packwiz_directory', { id, path }); }
 
+export async function updateAllServer(id, loaderVersion) {
+    updateStatus("Actualizando servidor...", "#f9e2af");
+    try {
+        await invoke('update_server', { id, loaderVersion });
+    } catch (e) {
+        alert("Error: " + e);
+    }
+}
+
 window.sendAction = sendAction;
 window.confirmDelete = confirmDelete;
 window.openServerFolder = openServerFolder;

@@ -25,6 +25,7 @@ struct AppState {
     root: Arc<PathBuf>,
     publish_target: Arc<crate::publisher::PublishTarget>,
     domain: Arc<String>,
+    token: Arc<String>,
 }
 
 pub async fn serve(
@@ -32,11 +33,13 @@ pub async fn serve(
     bind: String,
     publish_target: crate::publisher::PublishTarget,
     domain: String,
+    token: String, // 👈 nuevo param
 ) -> Result<()> {
     let state = AppState {
         root: Arc::new(root),
         publish_target: Arc::new(publish_target),
         domain: Arc::new(domain),
+        token: Arc::new(token),
     };
     let app = Router::new()
         .route("/ws", get(ws_handler))
@@ -47,8 +50,34 @@ pub async fn serve(
     Ok(())
 }
 
-async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> impl IntoResponse {
+async fn ws_handler(
+    ws: WebSocketUpgrade,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let provided = params.get("token").map(String::as_str).unwrap_or("");
+    if !token_matches(provided, &state.token) {
+        return (
+            axum::http::StatusCode::UNAUTHORIZED,
+            "token inválido o ausente",
+        )
+            .into_response();
+    }
     ws.on_upgrade(move |socket| handle_socket(socket, state))
+        .into_response()
+}
+
+fn token_matches(provided: &str, expected: &str) -> bool {
+    let a = provided.as_bytes();
+    let b = expected.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
 }
 
 async fn handle_socket(socket: WebSocket, state: AppState) {
@@ -124,7 +153,9 @@ async fn ensure_packwiz_initialized(
         }
     }
     let loader = match server_type.as_str() {
-        "paper" | "velocity" => "none",
+        "paper" => "paper",
+        "velocity" => "velocity",
+        "folia" => "paper",
         other => other,
     };
     let status = tokio::process::Command::new(packwiz_bin)
@@ -266,6 +297,7 @@ async fn handle_request(
                     return;
                 }
                 let _ = tokio::fs::write(dest_dir.join("eula.txt"), "eula=true\n").await;
+                let image = podman::java_image_for(&cfg.server_type, &cfg.mc_version);
                 let result = match cfg.server_type.as_str() {
                     "paper" | "velocity" | "folia" => installer::install_papermc(
                         &client,
@@ -290,6 +322,7 @@ async fn handle_request(
                             &tx_clone,
                             &cfg.min_ram,
                             &cfg.max_ram,
+                            image,
                         )
                         .await
                     }
@@ -305,6 +338,7 @@ async fn handle_request(
                             &tx_clone,
                             &cfg.min_ram,
                             &cfg.max_ram,
+                            image,
                         )
                         .await
                     }
@@ -320,6 +354,7 @@ async fn handle_request(
                             &tx_clone,
                             &cfg.min_ram,
                             &cfg.max_ram,
+                            image,
                         )
                         .await
                     }
@@ -1023,7 +1058,7 @@ async fn handle_request(
                 let packwiz_dir = root_clone.join(&id).join("packwiz");
                 let mut files_list = Vec::new();
 
-                let categories = vec!["mods", "resourcepacks", "shaderpacks", "config"];
+                let categories = vec!["mods", "resourcepacks", "shaderpacks", "plugins", "config"];
 
                 for category in categories {
                     let target_dir = packwiz_dir.join(category);
@@ -1224,7 +1259,14 @@ async fn handle_request(
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
-                let file_path = root_clone.join(&id).join("packwiz").join(&path);
+                let base = root_clone.join(&id).join("packwiz");
+                let file_path = match safe_join(&base, &path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx_clone.send(ServerEvent::Error { message: e });
+                        return;
+                    }
+                };
                 let content = tokio::fs::read_to_string(&file_path).await.ok();
                 let _ = tx_clone.send(ServerEvent::FileContent { id, path, content });
             });
@@ -1233,7 +1275,14 @@ async fn handle_request(
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
-                let file_path = root_clone.join(&id).join("packwiz").join(&path);
+                let base = root_clone.join(&id).join("packwiz");
+                let file_path = match safe_join(&base, &path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx_clone.send(ServerEvent::Error { message: e });
+                        return;
+                    }
+                };
                 if tokio::fs::write(&file_path, content).await.is_ok() {
                     let _ = tx_clone.send(ServerEvent::Ack {
                         ok: true,
@@ -1251,7 +1300,14 @@ async fn handle_request(
             let root_clone = state.root.clone();
             tokio::spawn(async move {
                 let packwiz_dir = root_clone.join(&id).join("packwiz");
-                let file_path = packwiz_dir.join(&path);
+                let base = root_clone.join(&id).join("packwiz");
+                let file_path = match safe_join(&base, &path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx_clone.send(ServerEvent::Error { message: e });
+                        return;
+                    }
+                };
 
                 if file_path.is_dir() {
                     let _ = tokio::fs::remove_dir_all(&file_path).await;
@@ -1278,7 +1334,14 @@ async fn handle_request(
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
-                let dir_path = root_clone.join(&id).join("packwiz").join(&path);
+                let base = root_clone.join(&id).join("packwiz");
+                let dir_path = match safe_join(&base, &path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = tx_clone.send(ServerEvent::Error { message: e });
+                        return;
+                    }
+                };
 
                 if let Err(e) = tokio::fs::create_dir_all(&dir_path).await {
                     let _ = tx_clone.send(ServerEvent::Error {
@@ -1290,6 +1353,14 @@ async fn handle_request(
                         message: Some(format!("Carpeta {} creada", path)),
                     });
                 }
+            });
+        }
+
+        ClientRequest::UpdateServer { id, loader_version } => {
+            let tx_clone = tx.clone();
+            let root_clone = state.root.clone();
+            tokio::spawn(async move {
+                update_server(id, loader_version, root_clone, tx_clone).await;
             });
         }
     }
@@ -1328,4 +1399,188 @@ async fn existing_image_filename(images_dir: &std::path::Path, pack_key: &str) -
         }
     }
     None
+}
+
+fn safe_join(base: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
+    use std::path::Component;
+    let mut out = base.to_path_buf();
+    for comp in std::path::Path::new(rel).components() {
+        match comp {
+            Component::Normal(part) => out.push(part),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(format!("ruta inválida o fuera del modpack: '{rel}'"));
+            }
+        }
+    }
+    Ok(out)
+}
+
+async fn update_server(
+    id: String,
+    loader_version: Option<String>,
+    root: Arc<PathBuf>,
+    tx: mpsc::UnboundedSender<ServerEvent>,
+) {
+    let dest_dir = root.join(&id);
+    let env_path = dest_dir.join("server.env");
+    let env_data = match fs::read_to_string(&env_path).await {
+        Ok(d) => d,
+        Err(_) => {
+            let _ = tx.send(ServerEvent::Error {
+                message: "No encontré la configuración del servidor.".into(),
+            });
+            return;
+        }
+    };
+
+    let server_type = read_env_value(&env_data, "SERVER_TYPE").unwrap_or_else(|| "paper".into());
+    let mc_version = read_env_value(&env_data, "MC_VERSION").unwrap_or_else(|| "latest".into());
+    let min_ram = read_env_value(&env_data, "MIN_RAM").unwrap_or_else(|| "1G".into());
+    let max_ram = read_env_value(&env_data, "MAX_RAM").unwrap_or_else(|| "4G".into());
+
+    let pack_dir = dest_dir.join("packwiz");
+    let packwiz_bin = crate::system::deps::find_in_path("packwiz")
+        .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+
+    // 1) Actualizar mods/plugins vía packwiz (no toca binarios del servidor todavía)
+    if let Err(e) = ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx).await {
+        let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("❌ {}", e) });
+        return;
+    }
+    let _ = tx.send(ServerEvent::PackwizLog {
+        id: id.clone(),
+        line: "> Buscando actualizaciones de mods/plugins...".into(),
+    });
+    if let Ok(o) = tokio::process::Command::new(&packwiz_bin)
+        .args(["update", "--all", "-y"])
+        .current_dir(&pack_dir)
+        .output()
+        .await
+    {
+        for line in String::from_utf8_lossy(&o.stdout)
+            .lines()
+            .chain(String::from_utf8_lossy(&o.stderr).lines())
+        {
+            if !line.trim().is_empty() {
+                let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: line.trim().to_string() });
+            }
+        }
+    }
+    let _ = tokio::process::Command::new(&packwiz_bin).arg("refresh").current_dir(&pack_dir).output().await;
+
+    // 2) Frenar el servidor si estaba corriendo
+    let was_running = podman::is_running(&id).await;
+    if was_running {
+        let _ = tx.send(ServerEvent::PackwizLog {
+            id: id.clone(),
+            line: "⏸️ Deteniendo el servidor para actualizar el motor...".into(),
+        });
+        if let Err(e) = podman::container_action("stop", &id).await {
+            let _ = tx.send(ServerEvent::Error {
+                message: format!("No pude detener el contenedor, aborto la actualización: {e}"),
+            });
+            return;
+        }
+    }
+
+    // 3) Borrar binarios/librerías del motor viejo
+    let _ = tx.send(ServerEvent::PackwizLog {
+        id: id.clone(),
+        line: "🧹 Limpiando binarios del motor anterior...".into(),
+    });
+    if let Err(e) = clean_engine_files(&dest_dir).await {
+        let _ = tx.send(ServerEvent::PackwizLog {
+            id: id.clone(),
+            line: format!("⚠️ No pude limpiar del todo los archivos viejos: {e}"),
+        });
+    }
+
+    // 4) Reinstalar el motor a la última compilación
+    let client = reqwest::Client::new();
+    let image = podman::java_image_for(&server_type, &mc_version);
+    let install_result = match server_type.as_str() {
+        "paper" | "velocity" | "folia" => installer::install_papermc(
+            &client, &server_type, &mc_version, &dest_dir, &id, &tx, &min_ram, &max_ram,
+        )
+        .await
+        .map(|_| ()),
+        "fabric" => {
+            let Some(loader) = loader_version else {
+                let _ = tx.send(ServerEvent::Error { message: "Falta 'loader_version' para actualizar Fabric.".into() });
+                return;
+            };
+            installer::install_fabric(&client, &mc_version, &loader, &dest_dir, &id, &tx, &min_ram, &max_ram, image).await
+        }
+        "neoforge" => {
+            let Some(loader) = loader_version else {
+                let _ = tx.send(ServerEvent::Error { message: "Falta 'loader_version' para actualizar NeoForge.".into() });
+                return;
+            };
+            let url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar", loader);
+            installer::install_mod_installer(&client, &url, &format!("neoforge-{}-installer.jar", loader), &dest_dir, &id, &tx, &min_ram, &max_ram, image).await
+        }
+        "forge" => {
+            let Some(loader) = loader_version else {
+                let _ = tx.send(ServerEvent::Error { message: "Falta 'loader_version' para actualizar Forge.".into() });
+                return;
+            };
+            let url = format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{0}/forge-{0}-installer.jar", loader);
+            installer::install_mod_installer(&client, &url, &format!("forge-{}-installer.jar", loader), &dest_dir, &id, &tx, &min_ram, &max_ram, image).await
+        }
+        other => {
+            let _ = tx.send(ServerEvent::Error { message: format!("Motor '{other}' no soporta actualización automática.") });
+            return;
+        }
+    };
+    if let Err(e) = install_result {
+        let _ = tx.send(ServerEvent::Error { message: format!("Error al reinstalar el motor: {e}") });
+        return;
+    }
+
+    // 5) Sincronizar mods/plugins actualizados al servidor
+    let _ = tx.send(ServerEvent::PackwizLog {
+        id: id.clone(),
+        line: "> Sincronizando mods/plugins actualizados...".into(),
+    });
+    if let Err(e) = installer::sync_server_mods(&client, "packwiz/pack.toml", &dest_dir, &id, &tx).await {
+        let _ = tx.send(ServerEvent::PackwizLog {
+            id: id.clone(),
+            line: format!("❌ Error al sincronizar mods/plugins: {e}"),
+        });
+    }
+
+    // 6) Recrear contenedor y, si estaba corriendo, arrancarlo
+    let image = podman::java_image_for(&server_type, &mc_version);
+    if let Err(e) = podman::create_container(&id, &dest_dir, image).await {
+        let _ = tx.send(ServerEvent::Error { message: format!("No pude recrear el contenedor: {e}") });
+        return;
+    }
+    if was_running {
+        let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: "▶️ Reiniciando el servidor...".into() });
+        if let Err(e) = podman::container_action("start", &id).await {
+            let _ = tx.send(ServerEvent::Error { message: format!("No pude reiniciar el contenedor: {e}") });
+            return;
+        }
+    }
+
+    let _ = tx.send(ServerEvent::Ack {
+        ok: true,
+        message: Some("Servidor, motor y mods/plugins actualizados".into()),
+    });
+}
+
+async fn clean_engine_files(dest_dir: &std::path::Path) -> std::io::Result<()> {
+    let mut entries = tokio::fs::read_dir(dest_dir).await?;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("jar") {
+            let _ = tokio::fs::remove_file(&path).await;
+        }
+    }
+    let libraries = dest_dir.join("libraries");
+    if libraries.is_dir() {
+        let _ = tokio::fs::remove_dir_all(&libraries).await;
+    }
+    Ok(())
 }

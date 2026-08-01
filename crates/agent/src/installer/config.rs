@@ -27,27 +27,17 @@ pub fn find_free_rcon_port(start_port: u16) -> u16 {
 pub fn rcon_credentials_for(config: &ServerConfigParams) -> RconCredentials {
     let base_rcon_port = config.port.saturating_add(10_000);
     let port = find_free_rcon_port(base_rcon_port);
-
     RconCredentials {
         port,
-        password: generate_password(&config.display_name),
+        password: generate_password(),
     }
 }
 
-fn generate_password(seed: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let mut hasher = DefaultHasher::new();
-    seed.hash(&mut hasher);
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos()
-        .hash(&mut hasher);
-    std::process::id().hash(&mut hasher);
-    format!("{:016x}", hasher.finish())
+fn generate_password() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 pub async fn write_server_env(
@@ -108,6 +98,7 @@ max-players=20
 prevent-proxy-connections=false
 enable-rcon=true
 rcon.port={}
+rcon.ip=127.0.0.1
 rcon.password={}
 "#,
         config.port,

@@ -2,7 +2,7 @@ import { listen } from './core/tauri.js';
 import { initTabs } from './ui/tabs.js';
 import { initConnection, restoreLastConnection } from './features/connection.js';
 import { initCreator } from './features/creator.js';
-import { initServerDetail, currentServerId, appendPackwizLog, renderPackwizMods } from './ui/serverDetail.js';
+import { initServerDetail, currentServerId, appendPackwizLog, renderPackwizMods, renderFileContent } from './ui/serverDetail.js';
 import { appendLine } from './features/logs.js';
 import { renderServers, updateStatus } from './ui/serverList.js';
 import { invoke_ws_action, listPackwizMods } from './features/actions.js';
@@ -53,19 +53,7 @@ document.addEventListener("DOMContentLoaded", async () => {
                 window.renderPackwizTree(data.files);
             }
         } else if (data.type === "file_content") {
-            const editor = document.getElementById('pw-file-editor');
-            const saveBtn = document.getElementById('btn-pw-save-file');
-            if (data.content === null) {
-                editor.value = "⚠️ Este es un archivo binario (.jar, .zip) y no se puede editar.\nSin embargo, puedes eliminarlo con el botón de abajo.";
-                editor.disabled = true;
-                saveBtn.disabled = true;
-                saveBtn.style.opacity = "0.5";
-            } else {
-                editor.value = data.content;
-                editor.disabled = false;
-                saveBtn.disabled = false;
-                saveBtn.style.opacity = "1";
-            }
+            renderFileContent(data);
         }
     });
 

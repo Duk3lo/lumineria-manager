@@ -2,16 +2,19 @@ import {
     sendAction, confirmDelete, openServerFolder,
     addMod, removeMod, uploadMod, publishModpack,
     listPackwizMods, unpublishModpack, sendConsoleCommand, listPackwizFiles,
-    readFile, writeFile, deleteFile, createDirectory
+    readFile, writeFile, deleteFile, createDirectory, updateAllServer
 } from '../features/actions.js';
 import { openLogs, closeLogs } from '../features/logs.js';
 import { appendLine } from '../features/logs.js';
 import { showConfirm } from '../ui/confirmModal.js';
+import { getLatestLoaderVersion } from '../features/creator.js';
 
 let currentSelectedPath = ".";
 let lastPackwizTree = [];
 
 export let currentServerId = null;
+export let currentServerType = null;
+export let currentMcVersion = null;
 
 const viewGrid = document.getElementById('view-grid');
 const viewDetail = document.getElementById('view-server-detail');
@@ -22,6 +25,30 @@ const badgeEl = document.getElementById('detail-badge');
 const statusTextEl = document.getElementById('detail-status-text');
 
 export function initServerDetail() {
+
+    const btnUpdateAll = document.getElementById('btn-detail-update-all');
+    if (btnUpdateAll) {
+        btnUpdateAll.onclick = async () => {
+            const ok = await showConfirm(
+                `Esto va a:\n• Actualizar mods/plugins a sus últimas versiones\n• Actualizar el motor (${currentServerType}) a la última compilación para MC ${currentMcVersion}\n• Borrar binarios viejos y redescargar todo\n\n¿Continuar?`,
+                'Actualizar Todo'
+            );
+            if (!ok) return;
+
+            updateStatus("Buscando última versión del motor...", "#f9e2af");
+            let loaderVersion = null;
+            try {
+                loaderVersion = await getLatestLoaderVersion(currentServerType, currentMcVersion);
+                if (['fabric', 'forge', 'neoforge'].includes(currentServerType) && !loaderVersion) {
+                    return alert(`No encontré una versión de ${currentServerType} disponible para MC ${currentMcVersion}.`);
+                }
+            } catch (e) {
+                return alert("Error buscando la última versión del motor: " + e);
+            }
+
+            updateAllServer(currentServerId, loaderVersion);
+        };
+    }
 
     const btnConsoleSend = document.getElementById('btn-console-send');
     const consoleInput = document.getElementById('console-cmd-input');
@@ -258,6 +285,8 @@ export function initServerDetail() {
 
 export async function openServerDetail(server) {
     currentServerId = server.id;
+    currentServerType = server.server_type;
+    currentMcVersion = server.mc_version;
 
     if (titleEl) titleEl.innerText = server.display_name;
     if (badgeEl) badgeEl.innerText = `${server.server_type} ${server.mc_version}`;
@@ -331,6 +360,8 @@ export function renderPackwizMods(mods) {
             typeBadge = `<span style="color: #94e2d5;">⚙️ Config</span>`;
         } else if (mod.filename.includes("shaderpacks/")) {
             typeBadge = `<span style="color: #f9e2af;">🔮 Shader</span>`;
+        } else if (mod.filename.includes("plugins/")) {
+            typeBadge = `<span style="color: #89b4fa;">🔌 Plugin</span>`;
         }
 
         return `
@@ -406,9 +437,9 @@ export function renderPackwizTree(files) {
             e.stopPropagation();
             currentSelectedPath = node.dataset.path;
             const isDir = node.dataset.isdir === "true";
-            
+
             document.getElementById('pw-selected-path').innerText = currentSelectedPath === "." ? "/ (Raíz)" : `/${currentSelectedPath}`;
-            
+
             const folderPanel = document.getElementById('pw-folder-panel');
             const filePanel = document.getElementById('pw-file-panel');
             const btnDeleteDir = document.getElementById('btn-pw-delete-dir');
@@ -419,21 +450,21 @@ export function renderPackwizTree(files) {
                 folderPanel.style.display = 'flex';
                 filePanel.classList.add('hidden');
                 filePanel.style.display = 'none';
-                
+
                 // Mostrar botón de borrar carpeta SOLO si no es la raíz (".")
                 if (currentSelectedPath === ".") {
                     btnDeleteDir.classList.add('hidden');
                 } else {
                     btnDeleteDir.classList.remove('hidden');
                 }
-                
+
             } else {
                 // Mostrar panel de archivo
                 folderPanel.classList.add('hidden');
                 folderPanel.style.display = 'none';
                 filePanel.classList.remove('hidden');
                 filePanel.style.display = 'flex';
-                
+
                 document.getElementById('pw-file-editor').value = "Cargando archivo...";
                 readFile(currentServerId, currentSelectedPath);
             }
@@ -481,6 +512,23 @@ export function renderPackwizTree(files) {
                 }, 500);
             }
         };
+    }
+}
+
+export function renderFileContent(data) {
+    if (data.id !== currentServerId || data.path !== currentSelectedPath) return;
+    const editor = document.getElementById('pw-file-editor');
+    const saveBtn = document.getElementById('btn-pw-save-file');
+    if (data.content === null) {
+        editor.value = "⚠️ Este es un archivo binario (.jar, .zip) y no se puede editar.\nSi crees que debería existir, actualiza el árbol de archivos.";
+        editor.disabled = true;
+        saveBtn.disabled = true;
+        saveBtn.style.opacity = "0.5";
+    } else {
+        editor.value = data.content;
+        editor.disabled = false;
+        saveBtn.disabled = false;
+        saveBtn.style.opacity = "1";
     }
 }
 

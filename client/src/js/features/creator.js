@@ -3,7 +3,7 @@ import { STATE } from '../core/state.js';
 import { invoke_ws_action } from './actions.js';
 import { updateStatus } from '../ui/serverList.js';
 
-function mcVersionToNeoforgePrefix(mcVersion) {
+export function mcVersionToNeoforgePrefix(mcVersion) {
     const parts = mcVersion.split('.');
     if (parts[0] === '1') {
         if (parts.length >= 3) return `${parts[1]}.${parts[2]}`;
@@ -11,6 +11,27 @@ function mcVersionToNeoforgePrefix(mcVersion) {
     }
     if (parts.length >= 3) return `${parts[0]}.${parts[1]}.${parts[2]}`;
     return `${parts[0]}.${parts[1]}.0`;
+}
+
+export async function getLatestLoaderVersion(type, mcVersion) {
+    if (type === 'fabric') {
+        const res = await fetch(`https://meta.fabricmc.net/v2/versions/loader/${mcVersion}`);
+        const loaders = await res.json();
+        const stable = loaders.find(l => l.loader.stable) || loaders[0];
+        return stable ? stable.loader.version : null;
+    }
+    if (type === 'neoforge') {
+        if (STATE.cachedNeoForge.length === 0) STATE.cachedNeoForge = await invoke('fetch_neoforge_versions');
+        const prefix = mcVersionToNeoforgePrefix(mcVersion);
+        const matches = STATE.cachedNeoForge.filter(v => v.startsWith(`${prefix}.`));
+        return matches.length ? matches[matches.length - 1] : null;
+    }
+    if (type === 'forge') {
+        if (Object.keys(STATE.cachedForge).length === 0) STATE.cachedForge = await invoke('fetch_forge_versions');
+        const matches = STATE.cachedForge[mcVersion] || [];
+        return matches.length ? matches[matches.length - 1] : null;
+    }
+    return null;
 }
 
 async function ensureMojangVersions() {
@@ -138,7 +159,7 @@ export async function submitCreateServer() {
         min_ram: minRam,
         max_ram: maxRam,
         online_mode: onlineMode,
-        enforce_secure_profile: !onlineMode,
+        enforce_secure_profile: onlineMode,
     };
 
     document.getElementById('creator-modal').classList.add('hidden');

@@ -58,6 +58,10 @@ pub enum ClientRequest {
     ListPackwizFiles {
         id: String,
     },
+    UpdateServer {
+        id: String,
+        loader_version: Option<String>,
+    },
     CreateDirectory {
         id: String,
         path: String,

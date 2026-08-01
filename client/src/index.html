@@ -60,7 +60,7 @@
                     </div>
 
                     <div id="remote-setup" class="hidden" style="margin-top: 20px;">
-                        <input type="text" id="input-url" placeholder="ws://tuvps:8080/ws"
+                        <input type="text" id="input-url" placeholder="ws://tuvps:8080/ws?token=TU_TOKEN"
                             style="width: 300px; padding: 10px; border-radius: 5px; border: none;">
                         <button id="btn-connect-remote" class="primary-btn">Conectar</button>
                     </div>
@@ -94,6 +94,8 @@
                     <button id="btn-detail-stop" class="primary-btn"
                         style="background-color: #f38ba8; color: #11111b;">■ Detener</button>
                     <button id="btn-detail-restart" class="secondary-btn">↻ Reiniciar</button>
+                    <button id="btn-detail-update-all" class="secondary-btn"
+                        style="border-color:#89b4fa;color:#000000;">🔄 Actualizar Todo</button>
                     <span id="detail-status-text" style="margin-left: auto; color: #a6e3a1;">Detenido</span>
                 </div>
 

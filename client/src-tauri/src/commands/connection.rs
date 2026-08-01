@@ -121,17 +121,14 @@ pub async fn start_local_agent(app: AppHandle, root_path: String) -> Result<Stri
 
     let port = "127.0.0.1:8756";
     let publish_cfg = load_publish_config(app.clone()).await?;
+    let token = generate_token();
 
     let mut args = vec![
-        "serve".to_string(),
-        "--root".to_string(),
-        root_path.clone(),
-        "--bind".to_string(),
-        port.to_string(),
-        "--vps-remote-base".to_string(),
-        publish_cfg.remote_base.clone(),
-        "--domain".to_string(),
-        publish_cfg.domain.clone(),
+        "serve".to_string(), "--root".to_string(), root_path.clone(),
+        "--bind".to_string(), port.to_string(),
+        "--token".to_string(), token.clone(),   // 👈 nuevo
+        "--vps-remote-base".to_string(), publish_cfg.remote_base.clone(),
+        "--domain".to_string(), publish_cfg.domain.clone(),
     ];
     if let Some(host) = &publish_cfg.ssh_host {
         args.push("--vps-ssh-host".to_string());
@@ -160,7 +157,14 @@ pub async fn start_local_agent(app: AppHandle, root_path: String) -> Result<Stri
         }
     });
 
-    Ok(format!("ws://{port}/ws"))
+    Ok(format!("ws://{port}/ws?token={token}"))
+}
+
+fn generate_token() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 24];
+    rand::rngs::OsRng.fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 #[tauri::command]
