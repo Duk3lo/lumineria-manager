@@ -47,6 +47,7 @@ pub fn run() {
             commands::servers::delete_packwiz_file,
             commands::servers::create_packwiz_directory,
             commands::servers::update_server,
+            commands::servers::sync_pack_to_server,
             // --- Versions ---
             commands::versions::fetch_neoforge_versions,
             commands::versions::fetch_forge_versions,

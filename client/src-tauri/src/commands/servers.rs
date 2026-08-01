@@ -138,6 +138,11 @@ pub async fn delete_server(state: State<'_, AppState>, id: String) -> Result<(),
 }
 
 #[tauri::command]
+pub async fn sync_pack_to_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    send(&state, ClientRequest::SyncPackToServer { id }).await
+}
+
+#[tauri::command]
 pub async fn send_console_command(
     state: State<'_, AppState>,
     id: String,

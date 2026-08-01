@@ -1,6 +1,6 @@
 import {
     sendAction, confirmDelete, openServerFolder,
-    addMod, removeMod, uploadMod, publishModpack,
+    addMod, removeMod, uploadMod, publishModpack, syncPackToServer,
     listPackwizMods, unpublishModpack, sendConsoleCommand, listPackwizFiles,
     readFile, writeFile, deleteFile, createDirectory, updateAllServer
 } from '../features/actions.js';
@@ -321,6 +321,18 @@ export function initServerDetail() {
             const query = document.getElementById('pw-remove-input').value.trim();
             if (query) await removeMod(currentServerId, query);
         }, '⏳ Eliminando...');
+    }
+
+    const btnSyncServer = document.getElementById('btn-pw-sync-server');
+    if (btnSyncServer) {
+        withGuard(btnSyncServer, async () => {
+            const ok = await showConfirm(
+                `Esto va a:\n• Sincronizar los mods/plugins actuales del pack directamente en este servidor\n• Reiniciar el servidor si estaba corriendo\n\nNO publica nada para los clientes ni toca el modpack público.\n\n¿Continuar?`,
+                'Sincronizar solo con el Servidor'
+            );
+            if (!ok) return;
+            await syncPackToServer(currentServerId);
+        }, '⏳ Sincronizando...');
     }
 
     const btnUpload = document.getElementById('btn-pw-upload');

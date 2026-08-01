@@ -157,7 +157,7 @@ pub async fn install_mod_installer(
     tx: &mpsc::UnboundedSender<ServerEvent>,
     min_ram: &str,
     max_ram: &str,
-    image: &str, // 👈 nuevo
+    image: &str,
 ) -> Result<()> {
     let installer_path = dest_dir.join(installer_name);
     download_file(
@@ -178,7 +178,7 @@ pub async fn install_mod_installer(
 
     let vol_data = format!("{}:/data:Z", dest_dir.display());
 
-    let mut child = Command::new("podman")
+    let output = Command::new("podman")
         .args([
             "run",
             "--rm",
@@ -195,24 +195,36 @@ pub async fn install_mod_installer(
             installer_name,
             "--installServer",
         ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()?;
+        .output()
+        .await?;
 
-    let status = child.wait().await?;
-    if !status.success() {
-        bail!("Fallo en la instalación del cargador de mods en Podman.");
+    let joined: String = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .chain(String::from_utf8_lossy(&output.stderr).lines())
+        .filter(|l| !l.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !joined.is_empty() {
+        let _ = tx.send(ServerEvent::PackwizLog {
+            id: server_id.to_string(),
+            line: joined,
+        });
+    }
+
+    if !output.status.success() {
+        bail!(
+            "Fallo en la instalación del cargador de mods (código {:?}). Mirá el log de arriba.",
+            output.status.code()
+        );
     }
 
     let _ = fs::remove_file(installer_path).await;
-
     if dest_dir.join("run.sh").exists() {
         write_start_script_run_sh(dest_dir).await?;
     } else {
         let jar = find_launch_jar(dest_dir).await?;
         write_start_script(dest_dir, "forge", min_ram, max_ram, &jar).await?;
     }
-
     Ok(())
 }
 
@@ -380,7 +392,6 @@ async fn fetch_best_build(
         .ok_or_else(|| anyhow::anyhow!("No hay compilaciones disponibles"))
 }
 
-
 pub async fn latest_papermc_build(
     client: &reqwest::Client,
     project: &str,
@@ -407,7 +418,8 @@ pub async fn install_papermc(
     tx: &mpsc::UnboundedSender<ServerEvent>,
     min_ram: &str,
     max_ram: &str,
-) -> Result<(String, String)> { // 👈 ahora devuelve (jar_name, build_number)
+) -> Result<(String, String)> {
+    // 👈 ahora devuelve (jar_name, build_number)
     let best_build = fetch_best_build(client, project, mc_version).await?;
 
     let jar_name = best_build["downloads"]["server:default"]["name"]
@@ -423,7 +435,15 @@ pub async fn install_papermc(
         .ok_or_else(|| anyhow::anyhow!("No se encontró la url de descarga"))?;
 
     let output_path = dest_dir.join(&jar_name);
-    download_file(client, download_url, &output_path, server_id, "Descargando Motor", tx).await?;
+    download_file(
+        client,
+        download_url,
+        &output_path,
+        server_id,
+        "Descargando Motor",
+        tx,
+    )
+    .await?;
     write_start_script(dest_dir, project, min_ram, max_ram, &jar_name).await?;
 
     Ok((jar_name, build_number))
@@ -436,40 +456,34 @@ pub async fn latest_velocity_version(client: &reqwest::Client) -> Result<String>
         bail!("HTTP {} al consultar versiones de Velocity", response.status());
     }
     let json: Value = response.json().await?;
-    let versions_obj = json["versions"]
-        .as_object()
+    let versions_obj = json["versions"].as_object()
         .ok_or_else(|| anyhow::anyhow!("Formato inesperado: falta 'versions'"))?;
 
-    let candidates: Vec<String> = versions_obj
+    let mut candidates: Vec<String> = versions_obj
         .values()
         .filter_map(|v| v.as_array())
         .flatten()
         .filter_map(|v| v.as_str().map(|s| s.to_string()))
         .collect();
 
+    candidates.sort_by_key(|v| version_sort_key(v));
+
     for version in candidates.into_iter().rev() {
         let builds_url = format!("{}/velocity/versions/{}/builds", PAPER_API_BASE, version);
-        let Ok(res) = client.get(&builds_url).header("User-Agent", UA).send().await else {
-            continue;
-        };
-        if !res.status().is_success() {
-            continue;
-        }
-        let Ok(builds): Result<Value, _> = res.json().await else {
-            continue;
-        };
-        let has_good_build = builds
-            .as_array()
-            .map(|arr| {
-                arr.iter().any(|b| {
-                    let ch = b["channel"].as_str().unwrap_or("");
-                    ch == "STABLE" || ch == "RECOMMENDED"
-                })
-            })
-            .unwrap_or(false);
-        if has_good_build {
-            return Ok(version);
-        }
+        let Ok(res) = client.get(&builds_url).header("User-Agent", UA).send().await else { continue };
+        if !res.status().is_success() { continue; }
+        let Ok(builds): Result<Value, _> = res.json().await else { continue };
+        let has_good_build = builds.as_array().map(|arr| {
+            arr.iter().any(|b| matches!(b["channel"].as_str(), Some("STABLE") | Some("RECOMMENDED")))
+        }).unwrap_or(false);
+        if has_good_build { return Ok(version); }
     }
     bail!("No encontré ninguna versión de Velocity con build estable disponible")
+}
+
+fn version_sort_key(v: &str) -> Vec<u32> {
+    v.split('-').next().unwrap_or(v)
+        .split('.')
+        .map(|p| p.parse::<u32>().unwrap_or(0))
+        .collect()
 }

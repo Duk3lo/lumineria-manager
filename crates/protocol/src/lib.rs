@@ -66,6 +66,9 @@ pub enum ClientRequest {
         id: String,
         scope: FileScope,
     },
+    SyncPackToServer {
+        id: String,
+    },
     UpdateServer {
         id: String,
         loader_version: Option<String>,

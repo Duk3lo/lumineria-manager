@@ -154,6 +154,21 @@
                         </div>
 
                         <!-- PUBLICAR AL SERVIDOR -->
+
+                        <div
+                            style="background: #313244; padding: 20px; border-radius: 8px; border: 1px solid #94e2d5; margin-bottom: 20px;">
+                            <h3 style="margin-top:0; color: #94e2d5;">⬇️ Sincronizar Solo con Este Servidor</h3>
+                            <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 10px;">
+                                Actualiza los mods/plugins del pack directamente en <b>este</b> servidor (ideal para
+                                plugins de Paper
+                                u otras cosas que el cliente no necesita). <b>No publica nada para los clientes</b> ni
+                                toca el modpack público.
+                            </p>
+                            <button id="btn-pw-sync-server" class="primary-btn"
+                                style="background: #94e2d5; color: #11111b; width: 100%;">
+                                Sincronizar con el Servidor
+                            </button>
+                        </div>
                         <div
                             style="background: #313244; padding: 20px; border-radius: 8px; border: 1px solid #cba6f7; margin-bottom: 20px;">
                             <h3 style="margin-top:0; color: #cba6f7;">🚀 Publicar en Web (VPS)</h3>
@@ -343,7 +358,8 @@
                                 </div>
                                 <p style="color: #6c7086; font-size: 0.8em; margin: 0 0 10px;">No se muestran
                                     <code>packwiz/</code>, <code>libraries/</code> ni <code>cache/</code> (se gestionan
-                                    aparte o son muy pesadas).</p>
+                                    aparte o son muy pesadas).
+                                </p>
                                 <div id="sv-file-tree" style="font-size: 0.9em; user-select: none;">
                                     <p style="color: #6c7086; text-align: center;">Cargando árbol...</p>
                                 </div>
@@ -361,7 +377,8 @@
                                     <h3 style="margin-top:0; color: #fab387;">📁 Gestión de Carpeta</h3>
                                     <p style="color: #f38ba8; font-size: 0.8em;">⚠️ Editar/borrar archivos acá puede
                                         romper el servidor. Detenelo antes de tocar el jar o
-                                        <code>server.properties</code> en caliente.</p>
+                                        <code>server.properties</code> en caliente.
+                                    </p>
                                     <label style="font-size: 0.8em; color: #a6adc8; margin-bottom: 5px;">Selecciona
                                         múltiples archivos para subir aquí:</label>
                                     <input type="file" id="sv-upload-input" multiple

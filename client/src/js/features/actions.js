@@ -106,6 +106,11 @@ export async function createDirectory(id, path, scope = "packwiz") {
     await invoke('create_packwiz_directory', { id, path, scope });
 }
 
+export async function syncPackToServer(id) {
+    updateStatus("Sincronizando mods con el servidor...", "#f9e2af");
+    await invoke('sync_pack_to_server', { id });
+}
+
 export async function updateAllServer(id, loaderVersion, updateMods = true, updateEngine = true, force = false) {
     updateStatus("Actualizando servidor...", "#f9e2af");
     try {

@@ -100,5 +100,6 @@ pub(crate) async fn handle_request(
         ClientRequest::CreateDirectory { id, path, scope } => {
             files::create_directory(state, tx, id, path, scope).await
         }
+        ClientRequest::SyncPackToServer { id } => packwiz::sync_to_server(state, tx, id).await,
     }
 }

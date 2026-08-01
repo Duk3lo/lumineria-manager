@@ -489,66 +489,25 @@ pub(crate) async fn publish(
                         line: "🚀 Sincronización completada. El modpack está en línea.".into(),
                     });
 
-                    let was_running = podman::is_running(&id).await;
+                    match sync_mods_to_running_server(&dest_dir, &id, &tx_clone).await {
+    Ok(()) => {
+        let _ = tx_clone.send(ServerEvent::PackwizLog {
+            id: id.clone(),
+            line: "✅ Mods del servidor actualizados (archivos viejos eliminados).".into(),
+        });
+    }
+    Err(e) => {
+        let _ = tx_clone.send(ServerEvent::PackwizLog {
+            id: id.clone(),
+            line: format!("❌ Error al sincronizar mods del servidor: {e}"),
+        });
+    }
+}
 
-                    if was_running {
-                        let _ = tx_clone.send(ServerEvent::PackwizLog {
-                            id: id.clone(),
-                            line: "⏸️ Deteniendo el servidor para actualizar mods...".into(),
-                        });
-                        if let Err(e) = podman::container_action("stop", &id).await {
-                            let _ = tx_clone.send(ServerEvent::PackwizLog {
-                                id: id.clone(),
-                                line: format!(
-                                    "❌ No pude detener el contenedor, aborto la sincronización: {e}"
-                                ),
-                            });
-                            return;
-                        }
-                    }
-
-                    let client = reqwest::Client::new();
-                    let sync_result = installer::sync_server_mods(
-                        &client,
-                        "packwiz/pack.toml",
-                        &dest_dir,
-                        &id,
-                        &tx_clone,
-                    )
-                    .await;
-
-                    match sync_result {
-                        Ok(()) => {
-                            let _ = tx_clone.send(ServerEvent::PackwizLog {
-                                id: id.clone(),
-                                line: "✅ Mods del servidor actualizados (archivos viejos eliminados).".into(),
-                            });
-                        }
-                        Err(e) => {
-                            let _ = tx_clone.send(ServerEvent::PackwizLog {
-                                id: id.clone(),
-                                line: format!("❌ Error al sincronizar mods del servidor: {e}"),
-                            });
-                        }
-                    }
-
-                    if was_running {
-                        let _ = tx_clone.send(ServerEvent::PackwizLog {
-                            id: id.clone(),
-                            line: "▶️ Reiniciando el servidor...".into(),
-                        });
-                        if let Err(e) = podman::container_action("start", &id).await {
-                            let _ = tx_clone.send(ServerEvent::PackwizLog {
-                                id: id.clone(),
-                                line: format!("❌ No pude reiniciar el contenedor: {e}"),
-                            });
-                        }
-                    }
-
-                    let _ = tx_clone.send(ServerEvent::Ack {
-                        ok: true,
-                        message: Some("Publicación y sincronización completadas".into()),
-                    });
+let _ = tx_clone.send(ServerEvent::Ack {
+    ok: true,
+    message: Some("Publicación y sincronización completadas".into()),
+});
                 }
                 Err(e) => {
                     let _ = tx_clone.send(ServerEvent::PackwizLog {
@@ -614,7 +573,11 @@ pub(crate) async fn unpublish(
     });
 }
 
-pub(crate) async fn list_mods(state: &AppState, tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
+pub(crate) async fn list_mods(
+    state: &AppState,
+    tx: &mpsc::UnboundedSender<ServerEvent>,
+    id: String,
+) {
     let tx_clone = tx.clone();
     let root_clone = state.root.clone();
     tokio::spawn(async move {
@@ -702,4 +665,85 @@ async fn existing_image_filename(images_dir: &std::path::Path, pack_key: &str) -
         }
     }
     None
+}
+
+async fn sync_mods_to_running_server(
+    dest_dir: &std::path::Path,
+    id: &str,
+    tx: &mpsc::UnboundedSender<ServerEvent>,
+) -> anyhow::Result<()> {
+    let was_running = podman::is_running(id).await;
+
+    if was_running {
+        let _ = tx.send(ServerEvent::PackwizLog {
+            id: id.to_string(),
+            line: "⏸️ Deteniendo el servidor para actualizar mods...".into(),
+        });
+        podman::container_action("stop", id).await?;
+    }
+
+    let client = reqwest::Client::new();
+    let sync_result =
+        installer::sync_server_mods(&client, "packwiz/pack.toml", dest_dir, id, tx).await;
+
+    if was_running {
+        let _ = tx.send(ServerEvent::PackwizLog {
+            id: id.to_string(),
+            line: "▶️ Reiniciando el servidor...".into(),
+        });
+        podman::container_action("start", id).await?;
+    }
+
+    sync_result
+}
+
+pub(crate) async fn sync_to_server(
+    state: &AppState,
+    tx: &mpsc::UnboundedSender<ServerEvent>,
+    id: String,
+) {
+    let tx_clone = tx.clone();
+    let root_clone = state.root.clone();
+    tokio::spawn(async move {
+        let dest_dir = root_clone.join(&id);
+        let pack_dir = dest_dir.join("packwiz");
+        let packwiz_bin = crate::system::deps::find_in_path("packwiz")
+            .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+
+        let _ = tx_clone.send(ServerEvent::PackwizLog {
+            id: id.clone(),
+            line: "> Sincronizando mods/plugins solo con este servidor (sin publicar a clientes)...".into(),
+        });
+
+        if let Err(e) = ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx_clone).await {
+            let _ = tx_clone.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("❌ {}", e) });
+            return;
+        }
+
+        if let Ok(o) = tokio::process::Command::new(&packwiz_bin)
+            .arg("refresh")
+            .current_dir(&pack_dir)
+            .output()
+            .await
+        {
+            let log = String::from_utf8_lossy(&o.stdout);
+            if !log.is_empty() {
+                let _ = tx_clone.send(ServerEvent::PackwizLog { id: id.clone(), line: log.to_string() });
+            }
+        }
+
+        match sync_mods_to_running_server(&dest_dir, &id, &tx_clone).await {
+            Ok(()) => {
+                let _ = tx_clone.send(ServerEvent::Ack {
+                    ok: true,
+                    message: Some("Mods/plugins sincronizados solo en este servidor (no se publicó nada para clientes).".into()),
+                });
+            }
+            Err(e) => {
+                let _ = tx_clone.send(ServerEvent::Error {
+                    message: format!("Error al sincronizar mods/plugins con el servidor: {e}"),
+                });
+            }
+        }
+    });
 }
