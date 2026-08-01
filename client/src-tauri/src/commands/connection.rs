@@ -148,7 +148,7 @@ pub async fn start_local_agent(app: AppHandle, root_path: String) -> Result<Stri
         .envs(HashMap::from([(
             "LUMINERIA_TOKEN".to_string(),
             token.clone(),
-        )])); 
+        )]));
     let (mut rx, child) = sidecar.spawn().map_err(|e| e.to_string())?;
     std::fs::write(&pid_path, child.pid().to_string()).map_err(|e| e.to_string())?;
 
