@@ -428,3 +428,48 @@ pub async fn install_papermc(
 
     Ok((jar_name, build_number))
 }
+
+pub async fn latest_velocity_version(client: &reqwest::Client) -> Result<String> {
+    let url = format!("{}/velocity", PAPER_API_BASE);
+    let response = client.get(&url).header("User-Agent", UA).send().await?;
+    if !response.status().is_success() {
+        bail!("HTTP {} al consultar versiones de Velocity", response.status());
+    }
+    let json: Value = response.json().await?;
+    let versions_obj = json["versions"]
+        .as_object()
+        .ok_or_else(|| anyhow::anyhow!("Formato inesperado: falta 'versions'"))?;
+
+    let candidates: Vec<String> = versions_obj
+        .values()
+        .filter_map(|v| v.as_array())
+        .flatten()
+        .filter_map(|v| v.as_str().map(|s| s.to_string()))
+        .collect();
+
+    for version in candidates.into_iter().rev() {
+        let builds_url = format!("{}/velocity/versions/{}/builds", PAPER_API_BASE, version);
+        let Ok(res) = client.get(&builds_url).header("User-Agent", UA).send().await else {
+            continue;
+        };
+        if !res.status().is_success() {
+            continue;
+        }
+        let Ok(builds): Result<Value, _> = res.json().await else {
+            continue;
+        };
+        let has_good_build = builds
+            .as_array()
+            .map(|arr| {
+                arr.iter().any(|b| {
+                    let ch = b["channel"].as_str().unwrap_or("");
+                    ch == "STABLE" || ch == "RECOMMENDED"
+                })
+            })
+            .unwrap_or(false);
+        if has_good_build {
+            return Ok(version);
+        }
+    }
+    bail!("No encontré ninguna versión de Velocity con build estable disponible")
+}
