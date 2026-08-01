@@ -1,5 +1,6 @@
 use anyhow::Result;
 use protocol::ServerConfigParams;
+use std::net::TcpListener;
 use std::path::Path;
 use tokio::fs;
 
@@ -8,8 +9,25 @@ pub struct RconCredentials {
     pub password: String,
 }
 
+pub fn is_port_free(port: u16) -> bool {
+    TcpListener::bind(("0.0.0.0", port)).is_ok()
+}
+
+pub fn find_free_rcon_port(start_port: u16) -> u16 {
+    let mut port = start_port;
+    while port < 65535 {
+        if is_port_free(port) {
+            return port;
+        }
+        port += 1;
+    }
+    start_port
+}
+
 pub fn rcon_credentials_for(config: &ServerConfigParams) -> RconCredentials {
-    let port = config.port.saturating_add(10_000);
+    let base_rcon_port = config.port.saturating_add(10_000);
+    let port = find_free_rcon_port(base_rcon_port);
+
     RconCredentials {
         port,
         password: generate_password(&config.display_name),

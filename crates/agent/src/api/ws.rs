@@ -231,6 +231,15 @@ async fn handle_request(
             let root_clone = state.root.clone();
             tokio::spawn(async move {
                 let dest_dir = root_clone.join(&id);
+                if !crate::installer::config::is_port_free(cfg.port) {
+                    let _ = tx_clone.send(ServerEvent::Error {
+                        message: format!(
+                            "❌ El puerto de Minecraft ({}) ya está siendo utilizado por otro servidor o servicio. Por favor, elige otro puerto.",
+                            cfg.port
+                        ),
+                    });
+                    return;
+                }
                 if let Err(e) = fs::create_dir_all(&dest_dir).await {
                     let _ = tx_clone.send(ServerEvent::Error {
                         message: format!("No se pudo crear directorio: {e}"),
@@ -1250,7 +1259,6 @@ async fn handle_request(
                     let _ = tokio::fs::remove_file(&file_path).await;
                 }
 
-
                 let packwiz_bin = crate::system::deps::find_in_path("packwiz")
                     .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
                 let _ = tokio::process::Command::new(&packwiz_bin)
@@ -1271,11 +1279,16 @@ async fn handle_request(
             let root_clone = state.root.clone();
             tokio::spawn(async move {
                 let dir_path = root_clone.join(&id).join("packwiz").join(&path);
-                
+
                 if let Err(e) = tokio::fs::create_dir_all(&dir_path).await {
-                    let _ = tx_clone.send(ServerEvent::Error { message: format!("Error al crear carpeta: {}", e) });
+                    let _ = tx_clone.send(ServerEvent::Error {
+                        message: format!("Error al crear carpeta: {}", e),
+                    });
                 } else {
-                    let _ = tx_clone.send(ServerEvent::Ack { ok: true, message: Some(format!("Carpeta {} creada", path)) });
+                    let _ = tx_clone.send(ServerEvent::Ack {
+                        ok: true,
+                        message: Some(format!("Carpeta {} creada", path)),
+                    });
                 }
             });
         }
