@@ -120,3 +120,24 @@ pub fn container_status(container_id: &str) -> ServerStatus {
         _ => ServerStatus::Unknown,
     }
 }
+
+pub fn is_port_registered(root: &Path, port: u16) -> Result<bool> {
+    for entry in std::fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let env_path = path.join("server.env");
+        if !env_path.exists() {
+            continue;
+        }
+        let env = parse_env_file(&env_path)?;
+        if let Some(p) = env.get("SERVER_PORT").and_then(|p| p.parse::<u16>().ok()) {
+            if p == port {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}

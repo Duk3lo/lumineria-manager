@@ -257,20 +257,33 @@ async fn handle_request(
                 handle.abort();
             }
         }
+
         ClientRequest::CreateServer { id, config: cfg } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
                 let dest_dir = root_clone.join(&id);
-                if !crate::installer::config::is_port_free(cfg.port) {
+                if dest_dir.exists() {
                     let _ = tx_clone.send(ServerEvent::Error {
                         message: format!(
-                            "❌ El puerto de Minecraft ({}) ya está siendo utilizado por otro servidor o servicio. Por favor, elige otro puerto.",
-                            cfg.port
+                            "❌ Ya existe un servidor con el id '{}'. Elege otro nombre.",
+                            id
                         ),
                     });
                     return;
                 }
+
+                let port_taken =
+                    crate::docker::discovery::is_port_registered(&root_clone, cfg.port)
+                        .unwrap_or(false)
+                        || !crate::installer::config::is_port_free(cfg.port);
+
+                if port_taken {
+                    let _ = tx_clone.send(ServerEvent::Error {
+                        message: format!("❌ El puerto {} ya está en uso por otro servidor (esté corriendo o no). Elege otro.", cfg.port),});
+                    return;
+                }
+
                 if let Err(e) = fs::create_dir_all(&dest_dir).await {
                     let _ = tx_clone.send(ServerEvent::Error {
                         message: format!("No se pudo crear directorio: {e}"),
@@ -449,6 +462,29 @@ async fn handle_request(
                     }
                 }
 
+                if !matches!(server_type.as_str(), "paper" | "velocity" | "folia") {
+                    let _ = tx_clone.send(ServerEvent::Error {
+                        message: "Auto-actualización solo disponible en motores Vanilla/PaperMC"
+                            .into(),
+                    });
+                    return;
+                }
+                let was_running = podman::is_running(&id).await;
+                if was_running {
+                    let _ = tx_clone.send(ServerEvent::PackwizLog {
+                        id: id.clone(),
+                        line: "⏸️ Deteniendo el servidor para actualizar el motor...".into(),
+                    });
+                    if let Err(e) = podman::container_action("stop", &id).await {
+                        let _ = tx_clone.send(ServerEvent::Error {
+                            message: format!(
+                                "No pude detener el contenedor, aborto la actualización: {e}"
+                            ),
+                        });
+                        return;
+                    }
+                }
+
                 let client = reqwest::Client::new();
                 let _ = tx_clone.send(ServerEvent::InstallProgress {
                     id: id.clone(),
@@ -456,42 +492,54 @@ async fn handle_request(
                     percentage: 20,
                 });
 
-                let result = match server_type.as_str() {
-                    "paper" | "velocity" | "folia" => installer::install_papermc(
-                        &client,
-                        &server_type,
-                        &mc_version,
-                        &dest_dir,
-                        &id,
-                        &tx_clone,
-                        &min_ram,
-                        &max_ram,
-                    )
-                    .await
-                    .map(|_| ()),
-                    _ => {
+                let result = installer::install_papermc(
+                    &client,
+                    &server_type,
+                    &mc_version,
+                    &dest_dir,
+                    &id,
+                    &tx_clone,
+                    &min_ram,
+                    &max_ram,
+                )
+                .await
+                .map(|_| ());
+
+                if let Err(e) = result {
+                    let _ = tx_clone.send(ServerEvent::Error {
+                        message: format!("Error al actualizar: {e}"),
+                    });
+                    return;
+                }
+                let image = podman::java_image_for(&server_type, &mc_version);
+                if let Err(e) = podman::create_container(&id, &dest_dir, image).await {
+                    let _ = tx_clone.send(ServerEvent::Error {
+                        message: format!("No pude recrear el contenedor: {e}"),
+                    });
+                    return;
+                }
+
+                if was_running {
+                    let _ = tx_clone.send(ServerEvent::PackwizLog {
+                        id: id.clone(),
+                        line: "▶️ Reiniciando el servidor...".into(),
+                    });
+                    if let Err(e) = podman::container_action("start", &id).await {
                         let _ = tx_clone.send(ServerEvent::Error {
-                            message:
-                                "Auto-actualización solo disponible en motores Vanilla/PaperMC"
-                                    .into(),
+                            message: format!("No pude reiniciar el contenedor: {e}"),
                         });
                         return;
                     }
-                };
-
-                match result {
-                    Ok(()) => {
-                        let _ = tx_clone.send(ServerEvent::Ack {
-                            ok: true,
-                            message: Some("Motor actualizado. Se usará al reiniciar.".into()),
-                        });
-                    }
-                    Err(e) => {
-                        let _ = tx_clone.send(ServerEvent::Error {
-                            message: format!("Error al actualizar: {e}"),
-                        });
-                    }
                 }
+
+                let _ = tx_clone.send(ServerEvent::Ack {
+                    ok: true,
+                    message: Some(if was_running {
+                        "Motor actualizado y servidor reiniciado.".into()
+                    } else {
+                        "Motor actualizado. Se usará al iniciar.".into()
+                    }),
+                });
             });
         }
 
@@ -561,6 +609,10 @@ async fn handle_request(
         }
 
         ClientRequest::DeleteServer { id } => {
+            if let Some(handle) = log_tasks.remove(&id) {
+                handle.abort();
+            }
+
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
@@ -720,33 +772,50 @@ async fn handle_request(
             filename,
             data_base64,
             folder,
+            scope,
         } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
                 use base64::{engine::general_purpose::STANDARD, Engine as _};
-                let dest_dir = root_clone.join(&id).join("packwiz");
+                if filename.is_empty()
+                    || filename.contains('/')
+                    || filename.contains('\\')
+                    || filename.contains("..")
+                {
+                    let _ = tx_clone.send(ServerEvent::PackwizLog {
+                        id: id.clone(),
+                        line: format!("❌ Nombre de archivo inválido: '{}'", filename),
+                    });
+                    return;
+                }
+
+                let base = base_dir_for_scope(&root_clone, &id, scope);
 
                 let is_root = folder.is_empty() || folder == "." || folder == "root";
-
                 let target_dir = if is_root {
-                    dest_dir.clone()
+                    base.clone()
                 } else {
-                    dest_dir.join(&folder)
+                    match safe_join(&base, &folder) {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let _ = tx_clone.send(ServerEvent::PackwizLog {
+                                id: id.clone(),
+                                line: format!("❌ {}", e),
+                            });
+                            return;
+                        }
+                    }
                 };
-
                 let _ = tokio::fs::create_dir_all(&target_dir).await;
 
                 let _ = tx_clone.send(ServerEvent::PackwizLog {
                     id: id.clone(),
                     line: if is_root {
-                        format!(
-                            "> Subiendo archivo local '{}' a la carpeta raíz...",
-                            filename
-                        )
+                        format!("> Subiendo archivo '{}' a la raíz...", filename)
                     } else {
                         format!(
-                            "> Subiendo archivo local '{}' a la carpeta '{}'...",
+                            "> Subiendo archivo '{}' a la carpeta '{}'...",
                             filename, folder
                         )
                     },
@@ -763,37 +832,36 @@ async fn handle_request(
                             return;
                         }
 
-                        let packwiz_bin = crate::system::deps::find_in_path("packwiz")
-                            .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
-
-                        let relative_file_path = if is_root {
-                            filename.clone()
-                        } else {
-                            format!("{}/{}", folder, filename)
-                        };
-
-                        let out = tokio::process::Command::new(&packwiz_bin)
-                            .arg("add")
-                            .arg(&relative_file_path)
-                            .current_dir(&dest_dir)
-                            .output()
-                            .await;
-
-                        if let Ok(o) = out {
-                            let log_out = String::from_utf8_lossy(&o.stdout);
-                            if !log_out.is_empty() {
-                                let _ = tx_clone.send(ServerEvent::PackwizLog {
-                                    id: id.clone(),
-                                    line: log_out.to_string(),
-                                });
+                        // El tracking con `packwiz add` solo tiene sentido dentro del modpack
+                        if scope == protocol::FileScope::Packwiz {
+                            let packwiz_bin = crate::system::deps::find_in_path("packwiz")
+                                .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+                            let relative_file_path = if is_root {
+                                filename.clone()
+                            } else {
+                                format!("{}/{}", folder, filename)
+                            };
+                            let out = tokio::process::Command::new(&packwiz_bin)
+                                .arg("add")
+                                .arg(&relative_file_path)
+                                .current_dir(&base)
+                                .output()
+                                .await;
+                            if let Ok(o) = out {
+                                let log_out = String::from_utf8_lossy(&o.stdout);
+                                if !log_out.is_empty() {
+                                    let _ = tx_clone.send(ServerEvent::PackwizLog {
+                                        id: id.clone(),
+                                        line: log_out.to_string(),
+                                    });
+                                }
                             }
                         }
 
                         let _ = tx_clone.send(ServerEvent::PackwizLog {
                             id: id.clone(),
-                            line: format!("✅ Archivo '{}' trackeado exitosamente.", filename),
+                            line: format!("✅ Archivo '{}' subido exitosamente.", filename),
                         });
-
                         let _ = tx_clone.send(ServerEvent::Ack {
                             ok: true,
                             message: None,
@@ -1245,21 +1313,27 @@ async fn handle_request(
             });
         }
 
-        ClientRequest::ListPackwizFiles { id } => {
+        ClientRequest::ListPackwizFiles { id, scope } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
-                let packwiz_dir = root_clone.join(&id).join("packwiz");
-                let files = build_file_tree(&packwiz_dir, "").await;
-                let _ = tx_clone.send(ServerEvent::PackwizFilesList { id, files });
+                let base = base_dir_for_scope(&root_clone, &id, scope);
+                let mut files = build_file_tree(&base, "").await;
+
+                if scope == protocol::FileScope::ServerRoot {
+                    let exclude = ["packwiz", "libraries", "cache", ".git"];
+                    files.retain(|n| !(n.is_dir && exclude.contains(&n.name.as_str())));
+                }
+
+                let _ = tx_clone.send(ServerEvent::PackwizFilesList { id, scope, files });
             });
         }
 
-        ClientRequest::ReadFile { id, path } => {
+        ClientRequest::ReadFile { id, path, scope } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
-                let base = root_clone.join(&id).join("packwiz");
+                let base = base_dir_for_scope(&root_clone, &id, scope);
                 let file_path = match safe_join(&base, &path) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1268,14 +1342,25 @@ async fn handle_request(
                     }
                 };
                 let content = tokio::fs::read_to_string(&file_path).await.ok();
-                let _ = tx_clone.send(ServerEvent::FileContent { id, path, content });
+                let _ = tx_clone.send(ServerEvent::FileContent {
+                    id,
+                    path,
+                    scope,
+                    content,
+                });
             });
         }
-        ClientRequest::WriteFile { id, path, content } => {
+
+        ClientRequest::WriteFile {
+            id,
+            path,
+            content,
+            scope,
+        } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
-                let base = root_clone.join(&id).join("packwiz");
+                let base = base_dir_for_scope(&root_clone, &id, scope);
                 let file_path = match safe_join(&base, &path) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1295,12 +1380,12 @@ async fn handle_request(
                 }
             });
         }
-        ClientRequest::DeleteFile { id, path } => {
+
+        ClientRequest::DeleteFile { id, path, scope } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
-                let packwiz_dir = root_clone.join(&id).join("packwiz");
-                let base = root_clone.join(&id).join("packwiz");
+                let base = base_dir_for_scope(&root_clone, &id, scope);
                 let file_path = match safe_join(&base, &path) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1315,13 +1400,16 @@ async fn handle_request(
                     let _ = tokio::fs::remove_file(&file_path).await;
                 }
 
-                let packwiz_bin = crate::system::deps::find_in_path("packwiz")
-                    .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
-                let _ = tokio::process::Command::new(&packwiz_bin)
-                    .arg("refresh")
-                    .current_dir(packwiz_dir)
-                    .output()
-                    .await;
+                // El refresh de packwiz solo aplica si tocamos algo del modpack
+                if scope == protocol::FileScope::Packwiz {
+                    let packwiz_bin = crate::system::deps::find_in_path("packwiz")
+                        .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+                    let _ = tokio::process::Command::new(&packwiz_bin)
+                        .arg("refresh")
+                        .current_dir(&base)
+                        .output()
+                        .await;
+                }
 
                 let _ = tx_clone.send(ServerEvent::Ack {
                     ok: true,
@@ -1330,11 +1418,11 @@ async fn handle_request(
             });
         }
 
-        ClientRequest::CreateDirectory { id, path } => {
+        ClientRequest::CreateDirectory { id, path, scope } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
-                let base = root_clone.join(&id).join("packwiz");
+                let base = base_dir_for_scope(&root_clone, &id, scope);
                 let dir_path = match safe_join(&base, &path) {
                     Ok(p) => p,
                     Err(e) => {
@@ -1356,11 +1444,26 @@ async fn handle_request(
             });
         }
 
-        ClientRequest::UpdateServer { id, loader_version } => {
+        ClientRequest::UpdateServer {
+            id,
+            loader_version,
+            update_mods,
+            update_engine,
+            force,
+        } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
-                update_server(id, loader_version, root_clone, tx_clone).await;
+                update_server(
+                    id,
+                    loader_version,
+                    update_mods,
+                    update_engine,
+                    force,
+                    root_clone,
+                    tx_clone,
+                )
+                .await;
             });
         }
     }
@@ -1401,6 +1504,13 @@ async fn existing_image_filename(images_dir: &std::path::Path, pack_key: &str) -
     None
 }
 
+fn base_dir_for_scope(root: &std::path::Path, id: &str, scope: protocol::FileScope) -> PathBuf {
+    match scope {
+        protocol::FileScope::Packwiz => root.join(id).join("packwiz"),
+        protocol::FileScope::ServerRoot => root.join(id),
+    }
+}
+
 fn safe_join(base: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
     use std::path::Component;
     let mut out = base.to_path_buf();
@@ -1419,9 +1529,19 @@ fn safe_join(base: &std::path::Path, rel: &str) -> Result<PathBuf, String> {
 async fn update_server(
     id: String,
     loader_version: Option<String>,
+    update_mods: bool,
+    update_engine: bool,
+    force: bool,
     root: Arc<PathBuf>,
     tx: mpsc::UnboundedSender<ServerEvent>,
 ) {
+    if !update_mods && !update_engine {
+        let _ = tx.send(ServerEvent::Error {
+            message: "No se seleccionó nada para actualizar.".into(),
+        });
+        return;
+    }
+
     let dest_dir = root.join(&id);
     let env_path = dest_dir.join("server.env");
     let env_data = match fs::read_to_string(&env_path).await {
@@ -1443,38 +1563,13 @@ async fn update_server(
     let packwiz_bin = crate::system::deps::find_in_path("packwiz")
         .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
 
-    // 1) Actualizar mods/plugins vía packwiz (no toca binarios del servidor todavía)
-    if let Err(e) = ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx).await {
-        let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("❌ {}", e) });
-        return;
-    }
-    let _ = tx.send(ServerEvent::PackwizLog {
-        id: id.clone(),
-        line: "> Buscando actualizaciones de mods/plugins...".into(),
-    });
-    if let Ok(o) = tokio::process::Command::new(&packwiz_bin)
-        .args(["update", "--all", "-y"])
-        .current_dir(&pack_dir)
-        .output()
-        .await
-    {
-        for line in String::from_utf8_lossy(&o.stdout)
-            .lines()
-            .chain(String::from_utf8_lossy(&o.stderr).lines())
-        {
-            if !line.trim().is_empty() {
-                let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: line.trim().to_string() });
-            }
-        }
-    }
-    let _ = tokio::process::Command::new(&packwiz_bin).arg("refresh").current_dir(&pack_dir).output().await;
-
-    // 2) Frenar el servidor si estaba corriendo
+    // Frenamos una sola vez, cubre tanto el caso de mods como el de motor
+    // (ambos tocan archivos vivos del servidor).
     let was_running = podman::is_running(&id).await;
     if was_running {
         let _ = tx.send(ServerEvent::PackwizLog {
             id: id.clone(),
-            line: "⏸️ Deteniendo el servidor para actualizar el motor...".into(),
+            line: "⏸️ Deteniendo el servidor para actualizar...".into(),
         });
         if let Err(e) = podman::container_action("stop", &id).await {
             let _ = tx.send(ServerEvent::Error {
@@ -1484,89 +1579,301 @@ async fn update_server(
         }
     }
 
-    // 3) Borrar binarios/librerías del motor viejo
-    let _ = tx.send(ServerEvent::PackwizLog {
-        id: id.clone(),
-        line: "🧹 Limpiando binarios del motor anterior...".into(),
-    });
-    if let Err(e) = clean_engine_files(&dest_dir).await {
-        let _ = tx.send(ServerEvent::PackwizLog {
-            id: id.clone(),
-            line: format!("⚠️ No pude limpiar del todo los archivos viejos: {e}"),
-        });
-    }
-
-    // 4) Reinstalar el motor a la última compilación
     let client = reqwest::Client::new();
-    let image = podman::java_image_for(&server_type, &mc_version);
-    let install_result = match server_type.as_str() {
-        "paper" | "velocity" | "folia" => installer::install_papermc(
-            &client, &server_type, &mc_version, &dest_dir, &id, &tx, &min_ram, &max_ram,
-        )
-        .await
-        .map(|_| ()),
-        "fabric" => {
-            let Some(loader) = loader_version else {
-                let _ = tx.send(ServerEvent::Error { message: "Falta 'loader_version' para actualizar Fabric.".into() });
-                return;
-            };
-            installer::install_fabric(&client, &mc_version, &loader, &dest_dir, &id, &tx, &min_ram, &max_ram, image).await
-        }
-        "neoforge" => {
-            let Some(loader) = loader_version else {
-                let _ = tx.send(ServerEvent::Error { message: "Falta 'loader_version' para actualizar NeoForge.".into() });
-                return;
-            };
-            let url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar", loader);
-            installer::install_mod_installer(&client, &url, &format!("neoforge-{}-installer.jar", loader), &dest_dir, &id, &tx, &min_ram, &max_ram, image).await
-        }
-        "forge" => {
-            let Some(loader) = loader_version else {
-                let _ = tx.send(ServerEvent::Error { message: "Falta 'loader_version' para actualizar Forge.".into() });
-                return;
-            };
-            let url = format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{0}/forge-{0}-installer.jar", loader);
-            installer::install_mod_installer(&client, &url, &format!("forge-{}-installer.jar", loader), &dest_dir, &id, &tx, &min_ram, &max_ram, image).await
-        }
-        other => {
-            let _ = tx.send(ServerEvent::Error { message: format!("Motor '{other}' no soporta actualización automática.") });
+    let mut engine_detail: Option<String> = None;
+
+    // 1) Mods/plugins vía packwiz
+    if update_mods {
+        if let Err(e) =
+            ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx).await
+        {
+            let _ = tx.send(ServerEvent::PackwizLog {
+                id: id.clone(),
+                line: format!("❌ {}", e),
+            });
+            if was_running {
+                let _ = podman::container_action("start", &id).await;
+            }
             return;
         }
-    };
-    if let Err(e) = install_result {
-        let _ = tx.send(ServerEvent::Error { message: format!("Error al reinstalar el motor: {e}") });
-        return;
-    }
 
-    // 5) Sincronizar mods/plugins actualizados al servidor
-    let _ = tx.send(ServerEvent::PackwizLog {
-        id: id.clone(),
-        line: "> Sincronizando mods/plugins actualizados...".into(),
-    });
-    if let Err(e) = installer::sync_server_mods(&client, "packwiz/pack.toml", &dest_dir, &id, &tx).await {
         let _ = tx.send(ServerEvent::PackwizLog {
             id: id.clone(),
-            line: format!("❌ Error al sincronizar mods/plugins: {e}"),
+            line: "> Buscando actualizaciones de mods/plugins...".into(),
         });
+        if let Ok(o) = tokio::process::Command::new(&packwiz_bin)
+            .args(["update", "--all", "-y"])
+            .current_dir(&pack_dir)
+            .output()
+            .await
+        {
+            let joined: String = String::from_utf8_lossy(&o.stdout)
+                .lines()
+                .chain(String::from_utf8_lossy(&o.stderr).lines())
+                .filter(|l| !l.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join("\n");
+            if !joined.is_empty() {
+                let _ = tx.send(ServerEvent::PackwizLog {
+                    id: id.clone(),
+                    line: joined,
+                });
+            }
+        }
+        let _ = tokio::process::Command::new(&packwiz_bin)
+            .arg("refresh")
+            .current_dir(&pack_dir)
+            .output()
+            .await;
+
+        let _ = tx.send(ServerEvent::PackwizLog {
+            id: id.clone(),
+            line: "> Sincronizando mods/plugins actualizados al servidor...".into(),
+        });
+        if let Err(e) =
+            installer::sync_server_mods(&client, "packwiz/pack.toml", &dest_dir, &id, &tx).await
+        {
+            let _ = tx.send(ServerEvent::PackwizLog {
+                id: id.clone(),
+                line: format!("❌ Error al sincronizar mods/plugins: {e}"),
+            });
+        }
     }
 
-    // 6) Recrear contenedor y, si estaba corriendo, arrancarlo
-    let image = podman::java_image_for(&server_type, &mc_version);
-    if let Err(e) = podman::create_container(&id, &dest_dir, image).await {
-        let _ = tx.send(ServerEvent::Error { message: format!("No pude recrear el contenedor: {e}") });
-        return;
+    // 2) Motor
+    if update_engine {
+        let current_build = read_env_value(&env_data, "ENGINE_BUILD");
+
+        // Chequeo liviano (una sola consulta a la API, sin descargar nada).
+        // Si force=true, nos lo salteamos directamente.
+        let mut skip_reinstall = false;
+        if !force {
+            let latest_id = match server_type.as_str() {
+                "paper" | "velocity" | "folia" => {
+                    match installer::latest_papermc_build(&client, &server_type, &mc_version).await
+                    {
+                        Ok((_, build)) => Some(build),
+                        Err(_) => None, // si falla el chequeo, seguimos e intentamos reinstalar igual
+                    }
+                }
+                "fabric" | "neoforge" | "forge" => loader_version.clone(),
+                _ => None,
+            };
+
+            if let (Some(latest), Some(current)) = (&latest_id, &current_build) {
+                if latest == current {
+                    skip_reinstall = true;
+                }
+            }
+        }
+
+        if skip_reinstall {
+            let _ = tx.send(ServerEvent::PackwizLog {
+                id: id.clone(),
+                line: format!(
+                    "✅ El motor ya está en la última compilación ({}). No hace falta reinstalar.",
+                    current_build.unwrap_or_default()
+                ),
+            });
+            engine_detail = Some(format!("{} (ya estaba al día)", mc_version));
+        } else {
+            let _ = tx.send(ServerEvent::PackwizLog {
+                id: id.clone(),
+                line: "🧹 Limpiando binarios del motor anterior...".into(),
+            });
+            if let Err(e) = clean_engine_files(&dest_dir).await {
+                let _ = tx.send(ServerEvent::PackwizLog {
+                    id: id.clone(),
+                    line: format!("⚠️ No pude limpiar del todo los archivos viejos: {e}"),
+                });
+            }
+
+            let image = podman::java_image_for(&server_type, &mc_version);
+            let mut new_build_id: Option<String> = None;
+
+            let install_result: Result<()> = match server_type.as_str() {
+                "paper" | "velocity" | "folia" => {
+                    match installer::install_papermc(
+                        &client,
+                        &server_type,
+                        &mc_version,
+                        &dest_dir,
+                        &id,
+                        &tx,
+                        &min_ram,
+                        &max_ram,
+                    )
+                    .await
+                    {
+                        Ok((jar_name, build_number)) => {
+                            engine_detail = Some(format!("{} ({})", mc_version, jar_name));
+                            new_build_id = Some(build_number);
+                            Ok(())
+                        }
+                        Err(e) => Err(e),
+                    }
+                }
+                "fabric" => {
+                    let Some(loader) = loader_version.clone() else {
+                        let _ = tx.send(ServerEvent::Error {
+                            message: "Falta 'loader_version' para actualizar Fabric.".into(),
+                        });
+                        if was_running {
+                            let _ = podman::container_action("start", &id).await;
+                        }
+                        return;
+                    };
+                    engine_detail = Some(format!("Fabric {} (MC {})", loader, mc_version));
+                    new_build_id = Some(loader.clone());
+                    installer::install_fabric(
+                        &client,
+                        &mc_version,
+                        &loader,
+                        &dest_dir,
+                        &id,
+                        &tx,
+                        &min_ram,
+                        &max_ram,
+                        image,
+                    )
+                    .await
+                }
+                "neoforge" => {
+                    let Some(loader) = loader_version.clone() else {
+                        let _ = tx.send(ServerEvent::Error {
+                            message: "Falta 'loader_version' para actualizar NeoForge.".into(),
+                        });
+                        if was_running {
+                            let _ = podman::container_action("start", &id).await;
+                        }
+                        return;
+                    };
+                    engine_detail = Some(format!("NeoForge {} (MC {})", loader, mc_version));
+                    new_build_id = Some(loader.clone());
+                    let url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar", loader);
+                    installer::install_mod_installer(
+                        &client,
+                        &url,
+                        &format!("neoforge-{}-installer.jar", loader),
+                        &dest_dir,
+                        &id,
+                        &tx,
+                        &min_ram,
+                        &max_ram,
+                        image,
+                    )
+                    .await
+                }
+                "forge" => {
+                    let Some(loader) = loader_version.clone() else {
+                        let _ = tx.send(ServerEvent::Error {
+                            message: "Falta 'loader_version' para actualizar Forge.".into(),
+                        });
+                        if was_running {
+                            let _ = podman::container_action("start", &id).await;
+                        }
+                        return;
+                    };
+                    engine_detail = Some(format!("Forge {} (MC {})", loader, mc_version));
+                    new_build_id = Some(loader.clone());
+                    let url = format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{0}/forge-{0}-installer.jar", loader);
+                    installer::install_mod_installer(
+                        &client,
+                        &url,
+                        &format!("forge-{}-installer.jar", loader),
+                        &dest_dir,
+                        &id,
+                        &tx,
+                        &min_ram,
+                        &max_ram,
+                        image,
+                    )
+                    .await
+                }
+                other => {
+                    let _ = tx.send(ServerEvent::Error {
+                        message: format!("Motor '{other}' no soporta actualización automática."),
+                    });
+                    if was_running {
+                        let _ = podman::container_action("start", &id).await;
+                    }
+                    return;
+                }
+            };
+
+            if let Err(e) = install_result {
+                let _ = tx.send(ServerEvent::Error {
+                    message: format!("Error al reinstalar el motor: {e}"),
+                });
+                if was_running {
+                    let _ = podman::container_action("start", &id).await;
+                }
+                return;
+            }
+
+            if let Some(detail) = &engine_detail {
+                let _ = tx.send(ServerEvent::PackwizLog {
+                    id: id.clone(),
+                    line: format!("✔ Motor instalado: {detail}"),
+                });
+            }
+
+            if let Some(build) = &new_build_id {
+                if let Err(e) = config::update_env_key(&dest_dir, "ENGINE_BUILD", build).await {
+                    let _ = tx.send(ServerEvent::PackwizLog {
+                        id: id.clone(),
+                        line: format!("⚠️ No pude guardar el build instalado: {e}"),
+                    });
+                }
+            }
+
+            let image = podman::java_image_for(&server_type, &mc_version);
+            if let Err(e) = podman::create_container(&id, &dest_dir, image).await {
+                let _ = tx.send(ServerEvent::Error {
+                    message: format!("No pude recrear el contenedor: {e}"),
+                });
+                if was_running {
+                    let _ = podman::container_action("start", &id).await;
+                }
+                return;
+            }
+        }
     }
+
     if was_running {
-        let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: "▶️ Reiniciando el servidor...".into() });
+        let _ = tx.send(ServerEvent::PackwizLog {
+            id: id.clone(),
+            line: "▶️ Reiniciando el servidor...".into(),
+        });
         if let Err(e) = podman::container_action("start", &id).await {
-            let _ = tx.send(ServerEvent::Error { message: format!("No pude reiniciar el contenedor: {e}") });
+            let _ = tx.send(ServerEvent::Error {
+                message: format!("No pude reiniciar el contenedor: {e}"),
+            });
             return;
         }
     }
 
+    let summary = match (update_mods, update_engine) {
+        (true, true) => format!(
+            "Servidor actualizado (mods/plugins + motor{})",
+            engine_detail
+                .as_deref()
+                .map(|d| format!(": {d}"))
+                .unwrap_or_default()
+        ),
+        (true, false) => "Mods/plugins actualizados y sincronizados".to_string(),
+        (false, true) => format!(
+            "Motor actualizado{}",
+            engine_detail
+                .as_deref()
+                .map(|d| format!(": {d}"))
+                .unwrap_or_default()
+        ),
+        (false, false) => unreachable!(),
+    };
     let _ = tx.send(ServerEvent::Ack {
         ok: true,
-        message: Some("Servidor, motor y mods/plugins actualizados".into()),
+        message: Some(summary),
     });
 }
 

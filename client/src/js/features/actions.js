@@ -66,9 +66,9 @@ export async function removeMod(id, query) {
     updateStatus("Eliminando mod...", "#f9e2af");
     await invoke('remove_mod_packwiz', { id, query });
 }
-export async function uploadMod(id, filename, dataBase64, folder) {
+export async function uploadMod(id, filename, dataBase64, folder, scope = "packwiz") {
     updateStatus("Subiendo archivo...", "#f9e2af");
-    await invoke('upload_mod_packwiz', { id, filename, dataBase64, folder });
+    await invoke('upload_mod_packwiz', { id, filename, dataBase64, folder, scope });
 }
 export async function publishModpack(id, packKey, image = null) {
     updateStatus("Publicando en VPS...", "#f9e2af");
@@ -89,20 +89,27 @@ export async function sendConsoleCommand(id, command) {
     await invoke('send_console_command', { id, command });
 }
 
-export async function listPackwizFiles(id) {
-    await invoke('list_packwiz_files', { id });
+export async function listPackwizFiles(id, scope = "packwiz") {
+    await invoke('list_packwiz_files', { id, scope });
 }
 
-export async function readFile(id, path) { await invoke('read_packwiz_file', { id, path }); }
-export async function writeFile(id, path, content) { await invoke('write_packwiz_file', { id, path, content }); }
-export async function deleteFile(id, path) { await invoke('delete_packwiz_file', { id, path }); }
+export async function readFile(id, path, scope = "packwiz") {
+    await invoke('read_packwiz_file', { id, path, scope });
+}
+export async function writeFile(id, path, content, scope = "packwiz") {
+    await invoke('write_packwiz_file', { id, path, content, scope });
+}
+export async function deleteFile(id, path, scope = "packwiz") {
+    await invoke('delete_packwiz_file', { id, path, scope });
+}
+export async function createDirectory(id, path, scope = "packwiz") {
+    await invoke('create_packwiz_directory', { id, path, scope });
+}
 
-export async function createDirectory(id, path) { await invoke('create_packwiz_directory', { id, path }); }
-
-export async function updateAllServer(id, loaderVersion) {
+export async function updateAllServer(id, loaderVersion, updateMods = true, updateEngine = true, force = false) {
     updateStatus("Actualizando servidor...", "#f9e2af");
     try {
-        await invoke('update_server', { id, loaderVersion });
+        await invoke('update_server', { id, loaderVersion, updateMods, updateEngine, force });
     } catch (e) {
         alert("Error: " + e);
     }

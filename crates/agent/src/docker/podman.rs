@@ -43,23 +43,34 @@ pub async fn sync_mods_now(container_id: &str) -> Result<()> {
 }
 
 pub async fn stream_logs(container_id: String, tx: mpsc::UnboundedSender<String>) -> Result<()> {
-    let cmd = format!("podman logs -f --tail 100 {} 2>&1", container_id);
-    let mut child = Command::new("bash")
-        .arg("-c")
-        .arg(&cmd)
+    let mut child = Command::new("podman")
+        .args(["logs", "-f", "--tail", "100", &container_id])
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()?;
 
     let stdout = child.stdout.take().expect("stdout piped");
-    let mut reader = BufReader::new(stdout).lines();
+    let stderr = child.stderr.take().expect("stderr piped");
 
-    while let Some(line) = reader.next_line().await? {
-        if tx.send(line).is_err() {
-            let _ = child.kill().await;
-            break;
+    let tx_out = tx.clone();
+    let out_task = tokio::spawn(async move {
+        let mut reader = BufReader::new(stdout).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            if tx_out.send(line).is_err() { break; }
         }
-    }
+    });
+
+    let tx_err = tx.clone();
+    let err_task = tokio::spawn(async move {
+        let mut reader = BufReader::new(stderr).lines();
+        while let Ok(Some(line)) = reader.next_line().await {
+            if tx_err.send(line).is_err() { break; }
+        }
+    });
+
+    let _ = child.wait().await;
+    let _ = out_task.await;
+    let _ = err_task.await;
 
     Ok(())
 }

@@ -114,3 +114,28 @@ rcon.password={}
     fs::write(props_path, props_content).await?;
     Ok(())
 }
+
+pub async fn update_env_key(dest_dir: &std::path::Path, key: &str, value: &str) -> anyhow::Result<()> {
+    let env_path = dest_dir.join("server.env");
+    let content = tokio::fs::read_to_string(&env_path).await.unwrap_or_default();
+
+    let mut found = false;
+    let mut new_lines: Vec<String> = content
+        .lines()
+        .map(|line| {
+            if line.starts_with(&format!("{key}=")) {
+                found = true;
+                format!("{key}=\"{value}\"")
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+
+    if !found {
+        new_lines.push(format!("{key}=\"{value}\""));
+    }
+
+    tokio::fs::write(&env_path, new_lines.join("\n") + "\n").await?;
+    Ok(())
+}

@@ -48,6 +48,13 @@ pub struct PackwizImage {
     pub data_base64: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FileScope {
+    Packwiz,
+    ServerRoot,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientRequest {
@@ -57,27 +64,36 @@ pub enum ClientRequest {
     },
     ListPackwizFiles {
         id: String,
+        scope: FileScope,
     },
     UpdateServer {
         id: String,
         loader_version: Option<String>,
+        update_mods: bool,
+        update_engine: bool,
+        #[serde(default)]
+        force: bool,
     },
     CreateDirectory {
         id: String,
         path: String,
+        scope: FileScope,
     },
     ReadFile {
         id: String,
         path: String,
+        scope: FileScope,
     },
     WriteFile {
         id: String,
         path: String,
         content: String,
+        scope: FileScope,
     },
     DeleteFile {
         id: String,
         path: String,
+        scope: FileScope,
     },
     SendConsoleCommand {
         id: String,
@@ -125,6 +141,7 @@ pub enum ClientRequest {
         filename: String,
         data_base64: String,
         folder: String,
+        scope: FileScope,
     },
     PublishPackwiz {
         id: String,
@@ -155,11 +172,13 @@ pub enum ServerEvent {
     },
     PackwizFilesList {
         id: String,
+        scope: FileScope,
         files: Vec<FileNode>,
     },
     FileContent {
         id: String,
         path: String,
+        scope: FileScope,
         content: Option<String>,
     },
     LogLine {

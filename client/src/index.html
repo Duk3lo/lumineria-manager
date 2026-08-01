@@ -94,8 +94,6 @@
                     <button id="btn-detail-stop" class="primary-btn"
                         style="background-color: #f38ba8; color: #11111b;">■ Detener</button>
                     <button id="btn-detail-restart" class="secondary-btn">↻ Reiniciar</button>
-                    <button id="btn-detail-update-all" class="secondary-btn"
-                        style="border-color:#89b4fa;color:#000000;">🔄 Actualizar Todo</button>
                     <span id="detail-status-text" style="margin-left: auto; color: #a6e3a1;">Detenido</span>
                 </div>
 
@@ -104,7 +102,8 @@
                     style="display: flex; gap: 10px; border-bottom: 2px solid #45475a; margin-bottom: 20px;">
                     <button class="tab-btn active" data-tab="tab-console">Terminal</button>
                     <button class="tab-btn" data-tab="tab-packwiz">Mods (Packwiz)</button>
-                    <button class="tab-btn" data-tab="tab-config">Configuración</button>
+                    <button class="tab-btn" data-tab="tab-updates">Actualizaciones</button>
+                    <button class="tab-btn" data-tab="tab-config">🗂️ Archivos</button>
                     <button id="btn-detail-delete" class="secondary-btn"
                         style="margin-left: auto; color: #f38ba8; border-color: #f38ba8;">🗑 Eliminar</button>
                 </div>
@@ -204,9 +203,71 @@
                         </div>
                     </div>
 
+                    <div id="tab-updates" class="tab-pane hidden">
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                            <div
+                                style="background: #313244; padding: 20px; border-radius: 8px; border: 1px solid #89b4fa;">
+                                <h3 style="margin-top:0; color: #89b4fa;">🔧 Actualizar Compilado (Motor)</h3>
+                                <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 15px;">
+                                    Descarga la última compilación estable del motor (jar) para la versión de Minecraft
+                                    configurada. Detiene y reinicia el servidor si estaba corriendo. No toca mods ni
+                                    plugins.
+                                </p>
+                                <button id="btn-update-engine" class="primary-btn"
+                                    style="background:#89b4fa; color:#11111b; width:100%;">Actualizar Solo el
+                                    Jar</button>
+                                <button id="btn-repair-engine" class="secondary-btn"
+                                    style="width:100%; margin-top:8px; border-color:#fab387; color:#fab387;">🔧 Reparar
+                                    (Reinstalar igual)</button>
+                            </div>
+                            <div
+                                style="background: #313244; padding: 20px; border-radius: 8px; border: 1px solid #cba6f7;">
+                                <h3 style="margin-top:0; color: #cba6f7;">📦 Actualizar Mods (Packwiz)</h3>
+                                <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 15px;">
+                                    Busca versiones más nuevas de todos los mods/plugins del pack y sincroniza los
+                                    archivos
+                                    actualizados al servidor. No toca el jar del motor.
+                                </p>
+                                <button id="btn-update-mods" class="primary-btn"
+                                    style="background:#cba6f7; color:#11111b; width:100%;">Actualizar Solo los
+                                    Mods</button>
+                            </div>
+                        </div>
+
+                        <div
+                            style="background: #313244; padding: 20px; border-radius: 8px; border: 1px solid #45475a; margin-bottom: 20px;">
+                            <h3 style="margin-top:0; color: #a6e3a1;">🔄 Actualizar Todo</h3>
+                            <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 15px;">
+                                Hace las dos cosas en un solo paso: mods/plugins primero, motor después.
+                            </p>
+                            <button id="btn-update-all" class="primary-btn"
+                                style="background:#a6e3a1; color:#11111b; width:100%;">Actualizar Todo</button>
+                        </div>
+
+                        <div style="background: #1e1e2e; border: 1px solid #45475a; border-radius: 8px; padding: 10px;">
+                            <div
+                                style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #313244; padding-bottom: 5px; margin-bottom: 10px;">
+                                <span style="color: #a6adc8; font-size: 0.85em; font-weight: bold;">Registro de
+                                    Actualizaciones</span>
+                                <button id="btn-clear-update-console"
+                                    style="background: none; border: none; color: #f38ba8; cursor: pointer; font-size: 0.85em;">Limpiar</button>
+                            </div>
+                            <div id="update-console" class="terminal"
+                                style="height: 300px; font-size: 0.85em; color: #a6e3a1; overflow-y: auto; white-space: pre-wrap;">
+                                Esperando actualizaciones...</div>
+                        </div>
+                    </div>
+
                     <div id="tab-config" class="tab-pane hidden">
-                        <div style="display: flex; gap: 20px; height: 450px;">
-                            <!-- GESTOR DE ARCHIVOS (ÁRBOL) -->
+                        <div style="display: flex; gap: 10px; margin-bottom: 15px;">
+                            <button id="btn-explorer-packwiz" class="tab-btn active" style="border-radius: 6px;">📦
+                                Modpack (Packwiz)</button>
+                            <button id="btn-explorer-server" class="tab-btn" style="border-radius: 6px;">🗄️ Carpeta del
+                                Servidor</button>
+                        </div>
+
+                        <!-- EXPLORADOR: MODPACK -->
+                        <div id="explorer-panel-packwiz" style="display: flex; gap: 20px; height: 450px;">
                             <div
                                 style="flex: 1; background: #1e1e2e; border: 1px solid #45475a; border-radius: 8px; padding: 10px; overflow-y: auto;">
                                 <div
@@ -220,7 +281,6 @@
                                 </div>
                             </div>
 
-                            <!-- ACCIONES DINÁMICAS (SUBIDA / EDICIÓN) -->
                             <div
                                 style="flex: 1; background: #313244; border-radius: 8px; padding: 20px; display: flex; flex-direction: column;">
                                 <div
@@ -229,10 +289,8 @@
                                         (Raíz)</strong>
                                 </div>
 
-                                <!-- PANEL CARPETA: Subir archivos y Gestión -->
                                 <div id="pw-folder-panel" style="display: flex; flex-direction: column; flex: 1;">
                                     <h3 style="margin-top:0; color: #89b4fa;">📁 Gestión de Carpeta</h3>
-
                                     <label style="font-size: 0.8em; color: #a6adc8; margin-bottom: 5px;">Selecciona
                                         múltiples archivos para subir aquí:</label>
                                     <input type="file" id="pw-upload-input" multiple
@@ -241,7 +299,6 @@
                                     <button id="btn-pw-upload" class="primary-btn"
                                         style="background: #89b4fa; color: #11111b; width: 100%; margin-bottom: 15px;">Subir
                                         a esta carpeta</button>
-
                                     <div style="display: flex; gap: 10px; margin-top: auto;">
                                         <button id="btn-pw-create-dir" class="secondary-btn"
                                             style="flex: 1; border-color: #a6e3a1; color: #a6e3a1;">+ Nueva
@@ -252,7 +309,6 @@
                                     </div>
                                 </div>
 
-                                <!-- PANEL ARCHIVO: Editor y Eliminar -->
                                 <div id="pw-file-panel" class="hidden"
                                     style="display: flex; flex-direction: column; flex: 1;">
                                     <h3 style="margin-top:0; color: #f9e2af;">📄 Editor de Archivo</h3>
@@ -274,11 +330,79 @@
                                 </div>
                             </div>
                         </div>
+
+                        <!-- EXPLORADOR: CARPETA DEL SERVIDOR -->
+                        <div id="explorer-panel-server" class="hidden" style="display: flex; gap: 20px; height: 450px;">
+                            <div
+                                style="flex: 1; background: #1e1e2e; border: 1px solid #45475a; border-radius: 8px; padding: 10px; overflow-y: auto;">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #313244; padding-bottom: 5px; margin-bottom: 10px;">
+                                    <h4 style="margin: 0; color: #a6adc8;">🗄️ Archivos del Servidor</h4>
+                                    <button id="btn-sv-refresh-tree"
+                                        style="background: none; border: none; color: #89b4fa; cursor: pointer; font-size: 1rem;">↻</button>
+                                </div>
+                                <p style="color: #6c7086; font-size: 0.8em; margin: 0 0 10px;">No se muestran
+                                    <code>packwiz/</code>, <code>libraries/</code> ni <code>cache/</code> (se gestionan
+                                    aparte o son muy pesadas).</p>
+                                <div id="sv-file-tree" style="font-size: 0.9em; user-select: none;">
+                                    <p style="color: #6c7086; text-align: center;">Cargando árbol...</p>
+                                </div>
+                            </div>
+
+                            <div
+                                style="flex: 1; background: #313244; border-radius: 8px; padding: 20px; display: flex; flex-direction: column;">
+                                <div
+                                    style="background: #1e1e2e; padding: 8px; border-radius: 4px; border: 1px solid #fab387; margin-bottom: 15px;">
+                                    <strong id="sv-selected-path" style="color: #a6e3a1; font-family: monospace;">/
+                                        (Raíz)</strong>
+                                </div>
+
+                                <div id="sv-folder-panel" style="display: flex; flex-direction: column; flex: 1;">
+                                    <h3 style="margin-top:0; color: #fab387;">📁 Gestión de Carpeta</h3>
+                                    <p style="color: #f38ba8; font-size: 0.8em;">⚠️ Editar/borrar archivos acá puede
+                                        romper el servidor. Detenelo antes de tocar el jar o
+                                        <code>server.properties</code> en caliente.</p>
+                                    <label style="font-size: 0.8em; color: #a6adc8; margin-bottom: 5px;">Selecciona
+                                        múltiples archivos para subir aquí:</label>
+                                    <input type="file" id="sv-upload-input" multiple
+                                        style="color: #cdd6f4; padding: 10px; background: #1e1e2e; border-radius: 4px; border: 1px solid #45475a; margin-bottom: 10px;">
+                                    <button id="btn-sv-upload" class="primary-btn"
+                                        style="background: #fab387; color: #11111b; width: 100%; margin-bottom: 15px;">Subir
+                                        a esta carpeta</button>
+                                    <div style="display: flex; gap: 10px; margin-top: auto;">
+                                        <button id="btn-sv-create-dir" class="secondary-btn"
+                                            style="flex: 1; border-color: #a6e3a1; color: #a6e3a1;">+ Nueva
+                                            Carpeta</button>
+                                        <button id="btn-sv-delete-dir" class="secondary-btn hidden"
+                                            style="flex: 1; border-color: #f38ba8; color: #f38ba8;">🗑 Eliminar
+                                            Carpeta</button>
+                                    </div>
+                                </div>
+
+                                <div id="sv-file-panel" class="hidden"
+                                    style="display: flex; flex-direction: column; flex: 1;">
+                                    <h3 style="margin-top:0; color: #f9e2af;">📄 Editor de Archivo</h3>
+                                    <textarea id="sv-file-editor" spellcheck="false"
+                                        style="flex: 1; background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 10px; font-family: monospace; resize: none; margin-bottom: 10px;"></textarea>
+                                    <div style="display: flex; gap: 10px;">
+                                        <button id="btn-sv-save-file" class="primary-btn"
+                                            style="flex: 1; background: #a6e3a1; color: #11111b;">Guardar
+                                            Cambios</button>
+                                        <button id="btn-sv-delete-file" class="secondary-btn"
+                                            style="color: #f38ba8; border-color: #f38ba8;">🗑 Eliminar</button>
+                                    </div>
+                                </div>
+
+                                <div style="border-top: 1px solid #45475a; padding-top: 15px; margin-top: 15px;">
+                                    <button id="btn-sv-open-os" class="secondary-btn" style="width: 100%;">📂 Abrir en
+                                        el Explorador del SO</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
-    </div>
-    </main>
+        </main>
     </div>
 
     <!-- MODAL DE CREACIÓN -->

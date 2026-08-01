@@ -95,7 +95,9 @@ async fn main() -> anyhow::Result<()> {
         } => {
             let root = root.canonicalize()?;
             let domain = normalize_base_url(&domain);
-            let token = token.unwrap_or_else(generate_token);
+            let token = token
+                .or_else(|| std::env::var("LUMINERIA_TOKEN").ok())
+                .unwrap_or_else(generate_token);
             tracing::warn!("🔑 Token del agente: {token}");
             tracing::warn!("   Conectá con: ws://host:puerto/ws?token={token}");
             let publish_target = match vps_ssh_host {

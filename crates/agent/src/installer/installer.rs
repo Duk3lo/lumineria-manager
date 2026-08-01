@@ -23,12 +23,15 @@ pub async fn download_file(
     if !response.status().is_success() {
         bail!("Fallo HTTP: {}", response.status());
     }
+    let mut tmp_name = dest.file_name().unwrap_or_default().to_os_string();
+    tmp_name.push(".part");
+    let tmp_dest = dest.with_file_name(tmp_name);
 
     let total_size = response.content_length().unwrap_or(0);
-    let mut file = fs::File::create(dest).await?;
+    let mut file = fs::File::create(&tmp_dest).await?;
     let mut stream = response.bytes_stream();
     let mut downloaded: u64 = 0;
-
+    let mut last_percentage: Option<u8> = None;
     while let Some(item) = futures_util::StreamExt::next(&mut stream).await {
         let chunk = item?;
         file.write_all(&chunk).await?;
@@ -36,73 +39,22 @@ pub async fn download_file(
 
         if total_size > 0 {
             let percentage = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
-            let _ = tx.send(ServerEvent::InstallProgress {
-                id: server_id.to_string(),
-                step: step_name.to_string(),
-                percentage,
-            });
+            if last_percentage.map_or(true, |p| percentage >= p + 5) || percentage == 100 {
+                last_percentage = Some(percentage);
+                let _ = tx.send(ServerEvent::InstallProgress {
+                    id: server_id.to_string(),
+                    step: step_name.to_string(),
+                    percentage,
+                });
+            }
         }
     }
+
+    file.flush().await?;
+    drop(file);
+    fs::rename(&tmp_dest, dest).await?;
+
     Ok(())
-}
-
-pub async fn install_papermc(
-    client: &reqwest::Client,
-    project: &str,
-    mc_version: &str,
-    dest_dir: &Path,
-    server_id: &str,
-    tx: &mpsc::UnboundedSender<ServerEvent>,
-    min_ram: &str,
-    max_ram: &str,
-) -> Result<String> {
-    let version_url = format!("{}/{}/versions/{}", PAPER_API_BASE, project, mc_version);
-    let builds_res = client
-        .get(&format!("{}/builds", version_url))
-        .header("User-Agent", UA)
-        .send()
-        .await?;
-
-    if !builds_res.status().is_success() {
-        bail!("La versión {} no es válida para {}", mc_version, project);
-    }
-
-    let builds: Value = builds_res.json().await?;
-    let arr = builds
-        .as_array()
-        .ok_or_else(|| anyhow::anyhow!("Respuesta inválida de builds"))?;
-
-    let best_build = arr
-        .iter()
-        .find(|b| {
-            let chan = b["channel"].as_str().unwrap_or("");
-            chan == "STABLE" || chan == "RECOMMENDED"
-        })
-        .or_else(|| arr.first())
-        .ok_or_else(|| anyhow::anyhow!("No hay compilaciones disponibles"))?;
-
-    let jar_name = best_build["downloads"]["server:default"]["name"]
-        .as_str()
-        .unwrap_or("server.jar")
-        .to_string();
-    let download_url = best_build["downloads"]["server:default"]["url"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("No se encontró la url de descarga"))?;
-
-    let output_path = dest_dir.join(&jar_name);
-    download_file(
-        client,
-        download_url,
-        &output_path,
-        server_id,
-        "Descargando Motor",
-        tx,
-    )
-    .await?;
-
-    write_start_script(dest_dir, project, min_ram, max_ram, &jar_name).await?;
-
-    Ok(jar_name)
 }
 
 pub async fn install_fabric(
@@ -114,7 +66,7 @@ pub async fn install_fabric(
     tx: &mpsc::UnboundedSender<ServerEvent>,
     min_ram: &str,
     max_ram: &str,
-    image: &str,   // 👈 nuevo
+    image: &str, // 👈 nuevo
 ) -> Result<()> {
     let response = client
         .get("https://meta.fabricmc.net/v2/versions/installer")
@@ -156,10 +108,13 @@ pub async fn install_fabric(
         .args([
             "run",
             "--rm",
-            "--network", "host",
+            "--network",
+            "host",
             "--userns=keep-id",
-            "-v", &vol_data,
-            "-w", "/data",
+            "-v",
+            &vol_data,
+            "-w",
+            "/data",
             image,
             "java",
             "-jar",
@@ -169,7 +124,7 @@ pub async fn install_fabric(
             mc_version,
             "-loader",
             loader_version,
-            "-downloadMinecraft"
+            "-downloadMinecraft",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -202,7 +157,7 @@ pub async fn install_mod_installer(
     tx: &mpsc::UnboundedSender<ServerEvent>,
     min_ram: &str,
     max_ram: &str,
-    image: &str,   // 👈 nuevo
+    image: &str, // 👈 nuevo
 ) -> Result<()> {
     let installer_path = dest_dir.join(installer_name);
     download_file(
@@ -227,15 +182,18 @@ pub async fn install_mod_installer(
         .args([
             "run",
             "--rm",
-            "--network", "host",
+            "--network",
+            "host",
             "--userns=keep-id",
-            "-v", &vol_data,
-            "-w", "/data",
+            "-v",
+            &vol_data,
+            "-w",
+            "/data",
             image,
             "java",
             "-jar",
             installer_name,
-            "--installServer"
+            "--installServer",
         ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -345,12 +303,16 @@ pub async fn sync_server_mods(
     let output = tokio::process::Command::new("podman")
         .args([
             "run",
-            "--rm",               // Se borra al terminar
-            "--network", "host",  // Para que tenga internet sin problemas
-            "--userns=keep-id",   // Mantiene los permisos de tu usuario Linux
-            "-v", &vol_data,
-            "-v", &vol_jar,
-            "-w", "/data",
+            "--rm", // Se borra al terminar
+            "--network",
+            "host",             // Para que tenga internet sin problemas
+            "--userns=keep-id", // Mantiene los permisos de tu usuario Linux
+            "-v",
+            &vol_data,
+            "-v",
+            &vol_jar,
+            "-w",
+            "/data",
             "docker.io/library/eclipse-temurin:21-jre",
             "java",
             "-jar",
@@ -364,16 +326,17 @@ pub async fn sync_server_mods(
         .await
         .context("no pude ejecutar podman run para packwiz-installer")?;
 
-    for line in String::from_utf8_lossy(&output.stdout)
+    let joined: String = String::from_utf8_lossy(&output.stdout)
         .lines()
         .chain(String::from_utf8_lossy(&output.stderr).lines())
-    {
-        if !line.trim().is_empty() {
-            let _ = tx.send(ServerEvent::PackwizLog {
-                id: id.to_string(),
-                line: line.trim().to_string(),
-            });
-        }
+        .filter(|l| !l.trim().is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !joined.is_empty() {
+        let _ = tx.send(ServerEvent::PackwizLog {
+            id: id.to_string(),
+            line: joined,
+        });
     }
 
     if !output.status.success() {
@@ -384,4 +347,84 @@ pub async fn sync_server_mods(
     }
 
     Ok(())
+}
+
+async fn fetch_best_build(
+    client: &reqwest::Client,
+    project: &str,
+    mc_version: &str,
+) -> Result<Value> {
+    let version_url = format!("{}/{}/versions/{}", PAPER_API_BASE, project, mc_version);
+    let builds_res = client
+        .get(&format!("{}/builds", version_url))
+        .header("User-Agent", UA)
+        .send()
+        .await?;
+
+    if !builds_res.status().is_success() {
+        bail!("La versión {} no es válida para {}", mc_version, project);
+    }
+
+    let builds: Value = builds_res.json().await?;
+    let arr = builds
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("Respuesta inválida de builds"))?;
+
+    arr.iter()
+        .find(|b| {
+            let chan = b["channel"].as_str().unwrap_or("");
+            chan == "STABLE" || chan == "RECOMMENDED"
+        })
+        .or_else(|| arr.first())
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("No hay compilaciones disponibles"))
+}
+
+
+pub async fn latest_papermc_build(
+    client: &reqwest::Client,
+    project: &str,
+    mc_version: &str,
+) -> Result<(String, String)> {
+    let best_build = fetch_best_build(client, project, mc_version).await?;
+    let jar_name = best_build["downloads"]["server:default"]["name"]
+        .as_str()
+        .unwrap_or("server.jar")
+        .to_string();
+    let build_number = best_build["id"]
+        .as_u64()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    Ok((jar_name, build_number))
+}
+
+pub async fn install_papermc(
+    client: &reqwest::Client,
+    project: &str,
+    mc_version: &str,
+    dest_dir: &Path,
+    server_id: &str,
+    tx: &mpsc::UnboundedSender<ServerEvent>,
+    min_ram: &str,
+    max_ram: &str,
+) -> Result<(String, String)> { // 👈 ahora devuelve (jar_name, build_number)
+    let best_build = fetch_best_build(client, project, mc_version).await?;
+
+    let jar_name = best_build["downloads"]["server:default"]["name"]
+        .as_str()
+        .unwrap_or("server.jar")
+        .to_string();
+    let build_number = best_build["id"]
+        .as_u64()
+        .map(|n| n.to_string())
+        .unwrap_or_default();
+    let download_url = best_build["downloads"]["server:default"]["url"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("No se encontró la url de descarga"))?;
+
+    let output_path = dest_dir.join(&jar_name);
+    download_file(client, download_url, &output_path, server_id, "Descargando Motor", tx).await?;
+    write_start_script(dest_dir, project, min_ram, max_ram, &jar_name).await?;
+
+    Ok((jar_name, build_number))
 }

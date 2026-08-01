@@ -2,7 +2,7 @@ import { listen } from './core/tauri.js';
 import { initTabs } from './ui/tabs.js';
 import { initConnection, restoreLastConnection } from './features/connection.js';
 import { initCreator } from './features/creator.js';
-import { initServerDetail, currentServerId, appendPackwizLog, renderPackwizMods, renderFileContent } from './ui/serverDetail.js';
+import { initServerDetail, currentServerId, appendPackwizLog, appendUpdateLog, renderPackwizMods, handleFilesListEvent, handleFileContentEvent } from './ui/serverDetail.js';
 import { appendLine } from './features/logs.js';
 import { renderServers, updateStatus } from './ui/serverList.js';
 import { invoke_ws_action, listPackwizMods } from './features/actions.js';
@@ -24,14 +24,19 @@ document.addEventListener("DOMContentLoaded", async () => {
             renderServers(data.servers);
         } else if (data.type === "install_progress") {
             updateStatus(`[${data.percentage}%] ${data.step}`, "#fab387");
+            if (currentServerId) appendUpdateLog(`[${data.percentage}%] ${data.step}`);
         } else if (data.type === "ack") {
             updateStatus("Conectado", "#a6e3a1");
-            if (data.message) alert("Operación completada: " + data.message);
+            if (data.message) {
+                if (currentServerId) appendUpdateLog(`✅ ${data.message}`);
+                else console.log("Operación completada:", data.message);
+            }
             invoke_ws_action({ type: "list_servers" });
             if (currentServerId) listPackwizMods(currentServerId);
         } else if (data.type === "error") {
             updateStatus("Error: " + data.message, "#f38ba8");
             alert("Error: " + data.message);
+            if (currentServerId) appendUpdateLog(`❌ ${data.message}`);
         } else if (data.type === "log_line") {
             if (data.id === currentServerId) {
                 appendLine(data.line);
@@ -39,6 +44,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         } else if (data.type === "packwiz_log") {
             if (data.id === currentServerId) {
                 appendPackwizLog(data.line);
+                appendUpdateLog(data.line);
             }
         } else if (data.type === "packwiz_mods_list") {
             if (data.id === currentServerId) {
@@ -49,11 +55,9 @@ document.addEventListener("DOMContentLoaded", async () => {
                 appendLine(data.response);
             }
         } else if (data.type === "packwiz_files_list") {
-            if (data.id === currentServerId && window.renderPackwizTree) {
-                window.renderPackwizTree(data.files);
-            }
+            handleFilesListEvent(data);
         } else if (data.type === "file_content") {
-            renderFileContent(data);
+            handleFileContentEvent(data);
         }
     });
 

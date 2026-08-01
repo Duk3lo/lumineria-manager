@@ -1,6 +1,7 @@
 use crate::core::agent_client;
 use crate::core::state::AppState;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_shell::ShellExt;
@@ -124,11 +125,15 @@ pub async fn start_local_agent(app: AppHandle, root_path: String) -> Result<Stri
     let token = generate_token();
 
     let mut args = vec![
-        "serve".to_string(), "--root".to_string(), root_path.clone(),
-        "--bind".to_string(), port.to_string(),
-        "--token".to_string(), token.clone(),   // 👈 nuevo
-        "--vps-remote-base".to_string(), publish_cfg.remote_base.clone(),
-        "--domain".to_string(), publish_cfg.domain.clone(),
+        "serve".to_string(),
+        "--root".to_string(),
+        root_path.clone(),
+        "--bind".to_string(),
+        port.to_string(),
+        "--vps-remote-base".to_string(),
+        publish_cfg.remote_base.clone(),
+        "--domain".to_string(),
+        publish_cfg.domain.clone(),
     ];
     if let Some(host) = &publish_cfg.ssh_host {
         args.push("--vps-ssh-host".to_string());
@@ -139,7 +144,11 @@ pub async fn start_local_agent(app: AppHandle, root_path: String) -> Result<Stri
         .shell()
         .sidecar("lumineria-agent")
         .map_err(|e| e.to_string())?
-        .args(args);
+        .args(args)
+        .envs(HashMap::from([(
+            "LUMINERIA_TOKEN".to_string(),
+            token.clone(),
+        )])); 
     let (mut rx, child) = sidecar.spawn().map_err(|e| e.to_string())?;
     std::fs::write(&pid_path, child.pid().to_string()).map_err(|e| e.to_string())?;
 

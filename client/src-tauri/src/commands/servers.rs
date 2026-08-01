@@ -56,10 +56,6 @@ pub async fn remove_mod_packwiz(state: tauri::State<'_, AppState>, id: String, q
 }
 
 #[tauri::command]
-pub async fn upload_mod_packwiz(state: tauri::State<'_, AppState>, id: String, filename: String, data_base64: String, folder: String) -> Result<(), String> {
-    send(&state, ClientRequest::UploadModPackwiz { id, filename, data_base64, folder }).await
-}
-#[tauri::command]
 pub async fn publish_packwiz(state: tauri::State<'_, AppState>, id: String, pack_key: String, image: Option<protocol::PackwizImage>) -> Result<(), String> {
     send(&state, ClientRequest::PublishPackwiz { id, pack_key, image }).await
 }
@@ -75,34 +71,47 @@ pub async fn unpublish_packwiz(state: tauri::State<'_, AppState>, id: String, pa
 }
 
 #[tauri::command]
-pub async fn list_packwiz_files(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
-    send(&state, ClientRequest::ListPackwizFiles { id }).await
+pub async fn list_packwiz_files(state: tauri::State<'_, AppState>, id: String, scope: protocol::FileScope) -> Result<(), String> {
+    send(&state, ClientRequest::ListPackwizFiles { id, scope }).await
 }
 
 #[tauri::command]
-pub async fn create_packwiz_directory(state: tauri::State<'_, AppState>, id: String, path: String) -> Result<(), String> {
-    send(&state, ClientRequest::CreateDirectory { id, path }).await
+pub async fn read_packwiz_file(state: tauri::State<'_, AppState>, id: String, path: String, scope: protocol::FileScope) -> Result<(), String> {
+    send(&state, ClientRequest::ReadFile { id, path, scope }).await
 }
 
 #[tauri::command]
-pub async fn read_packwiz_file(state: tauri::State<'_, AppState>, id: String, path: String) -> Result<(), String> {
-    send(&state, ClientRequest::ReadFile { id, path }).await
+pub async fn write_packwiz_file(state: tauri::State<'_, AppState>, id: String, path: String, content: String, scope: protocol::FileScope) -> Result<(), String> {
+    send(&state, ClientRequest::WriteFile { id, path, content, scope }).await
 }
 
 #[tauri::command]
-pub async fn write_packwiz_file(state: tauri::State<'_, AppState>, id: String, path: String, content: String) -> Result<(), String> {
-    send(&state, ClientRequest::WriteFile { id, path, content }).await
+pub async fn delete_packwiz_file(state: tauri::State<'_, AppState>, id: String, path: String, scope: protocol::FileScope) -> Result<(), String> {
+    send(&state, ClientRequest::DeleteFile { id, path, scope }).await
 }
 
 #[tauri::command]
-pub async fn update_server(state: State<'_, AppState>, id: String, loader_version: Option<String>) -> Result<(), String> {
-    send(&state, ClientRequest::UpdateServer { id, loader_version }).await
+pub async fn create_packwiz_directory(state: tauri::State<'_, AppState>, id: String, path: String, scope: protocol::FileScope) -> Result<(), String> {
+    send(&state, ClientRequest::CreateDirectory { id, path, scope }).await
 }
 
 #[tauri::command]
-pub async fn delete_packwiz_file(state: tauri::State<'_, AppState>, id: String, path: String) -> Result<(), String> {
-    send(&state, ClientRequest::DeleteFile { id, path }).await
+pub async fn upload_mod_packwiz(state: tauri::State<'_, AppState>, id: String, filename: String, data_base64: String, folder: String, scope: protocol::FileScope) -> Result<(), String> {
+    send(&state, ClientRequest::UploadModPackwiz { id, filename, data_base64, folder, scope }).await
 }
+
+#[tauri::command]
+pub async fn update_server(
+    state: State<'_, AppState>,
+    id: String,
+    loader_version: Option<String>,
+    update_mods: bool,
+    update_engine: bool,
+    force: bool,
+) -> Result<(), String> {
+    send(&state, ClientRequest::UpdateServer { id, loader_version, update_mods, update_engine, force }).await
+}
+
 
 #[tauri::command]
 pub async fn create_server(
@@ -139,6 +148,12 @@ pub async fn send_console_command(
 
 #[tauri::command]
 pub async fn open_folder_in_os(path: String) -> Result<(), String> {
+    let canonical = std::fs::canonicalize(&path)
+        .map_err(|_| "La carpeta indicada no existe.".to_string())?;
+    if !canonical.is_dir() {
+        return Err("La ruta indicada no es una carpeta.".to_string());
+    }
+
     #[cfg(target_os = "windows")]
     let command = "explorer";
     #[cfg(target_os = "linux")]
@@ -147,7 +162,7 @@ pub async fn open_folder_in_os(path: String) -> Result<(), String> {
     let command = "open";
 
     std::process::Command::new(command)
-        .arg(&path)
+        .arg(&canonical)
         .spawn()
         .map_err(|e| e.to_string())?;
     Ok(())
