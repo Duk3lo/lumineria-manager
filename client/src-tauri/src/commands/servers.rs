@@ -75,6 +75,31 @@ pub async fn unpublish_packwiz(state: tauri::State<'_, AppState>, id: String, pa
 }
 
 #[tauri::command]
+pub async fn list_packwiz_files(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    send(&state, ClientRequest::ListPackwizFiles { id }).await
+}
+
+#[tauri::command]
+pub async fn create_packwiz_directory(state: tauri::State<'_, AppState>, id: String, path: String) -> Result<(), String> {
+    send(&state, ClientRequest::CreateDirectory { id, path }).await
+}
+
+#[tauri::command]
+pub async fn read_packwiz_file(state: tauri::State<'_, AppState>, id: String, path: String) -> Result<(), String> {
+    send(&state, ClientRequest::ReadFile { id, path }).await
+}
+
+#[tauri::command]
+pub async fn write_packwiz_file(state: tauri::State<'_, AppState>, id: String, path: String, content: String) -> Result<(), String> {
+    send(&state, ClientRequest::WriteFile { id, path, content }).await
+}
+
+#[tauri::command]
+pub async fn delete_packwiz_file(state: tauri::State<'_, AppState>, id: String, path: String) -> Result<(), String> {
+    send(&state, ClientRequest::DeleteFile { id, path }).await
+}
+
+#[tauri::command]
 pub async fn create_server(
     state: State<'_, AppState>,
     id: String,

@@ -89,7 +89,16 @@ export async function sendConsoleCommand(id, command) {
     await invoke('send_console_command', { id, command });
 }
 
-// Vinculación global para que el HTML pueda llamar las funciones
+export async function listPackwizFiles(id) {
+    await invoke('list_packwiz_files', { id });
+}
+
+export async function readFile(id, path) { await invoke('read_packwiz_file', { id, path }); }
+export async function writeFile(id, path, content) { await invoke('write_packwiz_file', { id, path, content }); }
+export async function deleteFile(id, path) { await invoke('delete_packwiz_file', { id, path }); }
+
+export async function createDirectory(id, path) { await invoke('create_packwiz_directory', { id, path }); }
+
 window.sendAction = sendAction;
 window.confirmDelete = confirmDelete;
 window.openServerFolder = openServerFolder;

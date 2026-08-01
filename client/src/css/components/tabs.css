@@ -32,3 +32,6 @@
 .tab-pane.hidden {
     display: none;
 }
+
+.tree-node:hover { background: #45475a; }
+.tree-node.selected { background: #313244; border: 1px dashed #89b4fa; }

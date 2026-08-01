@@ -7,6 +7,7 @@ mod rcon;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+use std::path::Path;
 
 #[derive(Parser)]
 #[command(
@@ -51,9 +52,20 @@ fn normalize_base_url(raw: &str) -> String {
     let trimmed = raw.trim().trim_end_matches('/');
     if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
         trimmed.to_string()
+    } else if is_raw_ip_or_localhost(trimmed) {
+        format!("http://{trimmed}")
     } else {
         format!("https://{trimmed}")
     }
+}
+
+fn is_raw_ip_or_localhost(host: &str) -> bool {
+    if host == "localhost" {
+        return true;
+    }
+    let host_without_port = host.split(':').next().unwrap_or(host);
+
+    host_without_port.parse::<std::net::IpAddr>().is_ok()
 }
 
 #[tokio::main]
@@ -88,4 +100,57 @@ async fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+
+fn build_file_tree<'a>(
+    base_dir: &'a Path,
+    rel_path: &'a str,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<protocol::FileNode>> + Send + 'a>> {
+    Box::pin(async move {
+        let mut nodes = Vec::new();
+        let target = if rel_path.is_empty() {
+            base_dir.to_path_buf()
+        } else {
+            base_dir.join(rel_path)
+        };
+
+        if let Ok(mut entries) = tokio::fs::read_dir(target).await {
+            while let Ok(Some(entry)) = entries.next_entry().await {
+                let name = entry.file_name().to_string_lossy().to_string();
+                
+                // Ocultamos la carpeta interna de git y el archivo temporal de packwiz si existen
+                if name == ".git" || name == "packwiz.exe" { continue; }
+
+                let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
+                let new_rel = if rel_path.is_empty() {
+                    name.clone()
+                } else {
+                    format!("{}/{}", rel_path, name)
+                };
+
+                let children = if is_dir {
+                    Some(build_file_tree(base_dir, &new_rel).await)
+                } else {
+                    None
+                };
+
+                nodes.push(protocol::FileNode {
+                    name,
+                    is_dir,
+                    path: new_rel,
+                    children,
+                });
+            }
+        }
+        
+        // Ordenar: Carpetas primero, luego orden alfabético
+        nodes.sort_by(|a, b| match (a.is_dir, b.is_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        });
+        
+        nodes
+    })
 }

@@ -1,3 +1,4 @@
+use crate::build_file_tree;
 use crate::docker::{discovery, podman};
 use crate::installer::{config, installer};
 use anyhow::Result;
@@ -764,7 +765,11 @@ async fn handle_request(
             });
         }
 
-        ClientRequest::PublishPackwiz { id, pack_key, image } => {
+        ClientRequest::PublishPackwiz {
+            id,
+            pack_key,
+            image,
+        } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             let target_clone = state.publish_target.clone();
@@ -1192,6 +1197,85 @@ async fn handle_request(
                             message: format!("No pude conectar al RCON: {e}"),
                         });
                     }
+                }
+            });
+        }
+
+        ClientRequest::ListPackwizFiles { id } => {
+            let tx_clone = tx.clone();
+            let root_clone = state.root.clone();
+            tokio::spawn(async move {
+                let packwiz_dir = root_clone.join(&id).join("packwiz");
+                let files = build_file_tree(&packwiz_dir, "").await;
+                let _ = tx_clone.send(ServerEvent::PackwizFilesList { id, files });
+            });
+        }
+
+        ClientRequest::ReadFile { id, path } => {
+            let tx_clone = tx.clone();
+            let root_clone = state.root.clone();
+            tokio::spawn(async move {
+                let file_path = root_clone.join(&id).join("packwiz").join(&path);
+                let content = tokio::fs::read_to_string(&file_path).await.ok();
+                let _ = tx_clone.send(ServerEvent::FileContent { id, path, content });
+            });
+        }
+        ClientRequest::WriteFile { id, path, content } => {
+            let tx_clone = tx.clone();
+            let root_clone = state.root.clone();
+            tokio::spawn(async move {
+                let file_path = root_clone.join(&id).join("packwiz").join(&path);
+                if tokio::fs::write(&file_path, content).await.is_ok() {
+                    let _ = tx_clone.send(ServerEvent::Ack {
+                        ok: true,
+                        message: Some("Archivo guardado".into()),
+                    });
+                } else {
+                    let _ = tx_clone.send(ServerEvent::Error {
+                        message: "Error al guardar el archivo".into(),
+                    });
+                }
+            });
+        }
+        ClientRequest::DeleteFile { id, path } => {
+            let tx_clone = tx.clone();
+            let root_clone = state.root.clone();
+            tokio::spawn(async move {
+                let packwiz_dir = root_clone.join(&id).join("packwiz");
+                let file_path = packwiz_dir.join(&path);
+
+                if file_path.is_dir() {
+                    let _ = tokio::fs::remove_dir_all(&file_path).await;
+                } else {
+                    let _ = tokio::fs::remove_file(&file_path).await;
+                }
+
+
+                let packwiz_bin = crate::system::deps::find_in_path("packwiz")
+                    .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+                let _ = tokio::process::Command::new(&packwiz_bin)
+                    .arg("refresh")
+                    .current_dir(packwiz_dir)
+                    .output()
+                    .await;
+
+                let _ = tx_clone.send(ServerEvent::Ack {
+                    ok: true,
+                    message: Some("Eliminado correctamente".into()),
+                });
+            });
+        }
+
+        ClientRequest::CreateDirectory { id, path } => {
+            let tx_clone = tx.clone();
+            let root_clone = state.root.clone();
+            tokio::spawn(async move {
+                let dir_path = root_clone.join(&id).join("packwiz").join(&path);
+                
+                if let Err(e) = tokio::fs::create_dir_all(&dir_path).await {
+                    let _ = tx_clone.send(ServerEvent::Error { message: format!("Error al crear carpeta: {}", e) });
+                } else {
+                    let _ = tx_clone.send(ServerEvent::Ack { ok: true, message: Some(format!("Carpeta {} creada", path)) });
                 }
             });
         }

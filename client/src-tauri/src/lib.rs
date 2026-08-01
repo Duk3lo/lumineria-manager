@@ -41,6 +41,11 @@ pub fn run() {
             commands::connection::load_publish_config,
             commands::connection::save_publish_config,
             commands::servers::send_console_command,
+            commands::servers::list_packwiz_files,
+            commands::servers::read_packwiz_file,
+            commands::servers::write_packwiz_file,
+            commands::servers::delete_packwiz_file,
+            commands::servers::create_packwiz_directory,
             // --- Versions ---
             commands::versions::fetch_neoforge_versions,
             commands::versions::fetch_forge_versions,

@@ -48,6 +48,24 @@ document.addEventListener("DOMContentLoaded", async () => {
             if (data.id === currentServerId) {
                 appendLine(data.response);
             }
+        } else if (data.type === "packwiz_files_list") {
+            if (data.id === currentServerId && window.renderPackwizTree) {
+                window.renderPackwizTree(data.files);
+            }
+        } else if (data.type === "file_content") {
+            const editor = document.getElementById('pw-file-editor');
+            const saveBtn = document.getElementById('btn-pw-save-file');
+            if (data.content === null) {
+                editor.value = "⚠️ Este es un archivo binario (.jar, .zip) y no se puede editar.\nSin embargo, puedes eliminarlo con el botón de abajo.";
+                editor.disabled = true;
+                saveBtn.disabled = true;
+                saveBtn.style.opacity = "0.5";
+            } else {
+                editor.value = data.content;
+                editor.disabled = false;
+                saveBtn.disabled = false;
+                saveBtn.style.opacity = "1";
+            }
         }
     });
 

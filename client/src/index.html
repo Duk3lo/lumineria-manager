@@ -203,30 +203,73 @@
                     </div>
 
                     <div id="tab-config" class="tab-pane hidden">
-                        <!-- SUBIR ARCHIVO LOCAL MULTIPROPÓSITO -->
-                        <div style="background: #313244; padding: 20px; border-radius: 8px;">
-                            <h3 style="margin-top:0; color: #89b4fa;">📁 Subir Archivo Local (.jar, .zip, .toml, .json,
-                                .conf)</h3>
-                            <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 10px;">Selecciona el archivo y
-                                elige
-                                la carpeta de destino adecuada.</p>
-
-                            <div style="display: flex; flex-direction: column; gap: 10px;">
-                                <div style="display: flex; gap: 10px;">
-                                    <input type="file" id="pw-upload-input" accept=".jar,.zip,.toml,.json,.conf"
-                                        style="flex: 1; color: #cdd6f4; padding: 5px; background: #1e1e2e; border-radius: 4px; border: 1px solid #45475a;">
-
-                                    <select id="pw-upload-folder"
-                                        style="padding: 5px 10px; border-radius: 4px; background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; cursor: pointer;">
-                                        <option value="mods">Mods (.jar)</option>
-                                        <option value="config">Configuraciones (.toml, .json, .conf)</option>
-                                        <option value="resourcepacks">Texturas / Resource Packs (.zip)</option>
-                                        <option value="shaderpacks">Shaders (.zip)</option>
-                                        <option value=".">Carpeta Raíz (servers.dat, etc.)</option>
-                                    </select>
+                        <div style="display: flex; gap: 20px; height: 450px;">
+                            <!-- GESTOR DE ARCHIVOS (ÁRBOL) -->
+                            <div
+                                style="flex: 1; background: #1e1e2e; border: 1px solid #45475a; border-radius: 8px; padding: 10px; overflow-y: auto;">
+                                <div
+                                    style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #313244; padding-bottom: 5px; margin-bottom: 10px;">
+                                    <h4 style="margin: 0; color: #a6adc8;">🗂️ Archivos de Packwiz</h4>
+                                    <button id="btn-pw-refresh-tree"
+                                        style="background: none; border: none; color: #89b4fa; cursor: pointer; font-size: 1rem;">↻</button>
                                 </div>
-                                <button id="btn-pw-upload" class="primary-btn"
-                                    style="background: #89b4fa; color: #11111b; width: 100%;">Subir y Trackear</button>
+                                <div id="pw-file-tree" style="font-size: 0.9em; user-select: none;">
+                                    <p style="color: #6c7086; text-align: center;">Cargando árbol...</p>
+                                </div>
+                            </div>
+
+                            <!-- ACCIONES DINÁMICAS (SUBIDA / EDICIÓN) -->
+                            <div
+                                style="flex: 1; background: #313244; border-radius: 8px; padding: 20px; display: flex; flex-direction: column;">
+                                <div
+                                    style="background: #1e1e2e; padding: 8px; border-radius: 4px; border: 1px solid #89b4fa; margin-bottom: 15px;">
+                                    <strong id="pw-selected-path" style="color: #a6e3a1; font-family: monospace;">/
+                                        (Raíz)</strong>
+                                </div>
+
+                                <!-- PANEL CARPETA: Subir archivos y Gestión -->
+                                <div id="pw-folder-panel" style="display: flex; flex-direction: column; flex: 1;">
+                                    <h3 style="margin-top:0; color: #89b4fa;">📁 Gestión de Carpeta</h3>
+
+                                    <label style="font-size: 0.8em; color: #a6adc8; margin-bottom: 5px;">Selecciona
+                                        múltiples archivos para subir aquí:</label>
+                                    <input type="file" id="pw-upload-input" multiple
+                                        accept=".jar,.zip,.toml,.json,.conf,.txt,.properties"
+                                        style="color: #cdd6f4; padding: 10px; background: #1e1e2e; border-radius: 4px; border: 1px solid #45475a; margin-bottom: 10px;">
+                                    <button id="btn-pw-upload" class="primary-btn"
+                                        style="background: #89b4fa; color: #11111b; width: 100%; margin-bottom: 15px;">Subir
+                                        a esta carpeta</button>
+
+                                    <div style="display: flex; gap: 10px; margin-top: auto;">
+                                        <button id="btn-pw-create-dir" class="secondary-btn"
+                                            style="flex: 1; border-color: #a6e3a1; color: #a6e3a1;">+ Nueva
+                                            Carpeta</button>
+                                        <button id="btn-pw-delete-dir" class="secondary-btn hidden"
+                                            style="flex: 1; border-color: #f38ba8; color: #f38ba8;">🗑 Eliminar
+                                            Carpeta</button>
+                                    </div>
+                                </div>
+
+                                <!-- PANEL ARCHIVO: Editor y Eliminar -->
+                                <div id="pw-file-panel" class="hidden"
+                                    style="display: flex; flex-direction: column; flex: 1;">
+                                    <h3 style="margin-top:0; color: #f9e2af;">📄 Editor de Archivo</h3>
+                                    <textarea id="pw-file-editor" spellcheck="false"
+                                        style="flex: 1; background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 10px; font-family: monospace; resize: none; margin-bottom: 10px;"></textarea>
+                                    <div style="display: flex; gap: 10px;">
+                                        <button id="btn-pw-save-file" class="primary-btn"
+                                            style="flex: 1; background: #a6e3a1; color: #11111b;">Guardar
+                                            Cambios</button>
+                                        <button id="btn-pw-delete-file" class="secondary-btn"
+                                            style="color: #f38ba8; border-color: #f38ba8;">🗑 Eliminar</button>
+                                    </div>
+                                </div>
+
+                                <div style="border-top: 1px solid #45475a; padding-top: 15px; margin-top: 15px;">
+                                    <button id="btn-pw-publish-quick" class="primary-btn"
+                                        style="background: #cba6f7; color: #11111b; width: 100%;">🚀 Sincronizar
+                                        Modpack</button>
+                                </div>
                             </div>
                         </div>
                     </div>

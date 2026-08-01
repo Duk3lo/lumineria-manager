@@ -22,6 +22,14 @@ pub struct ServerInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileNode {
+    pub name: String,
+    pub is_dir: bool,
+    pub path: String,
+    pub children: Option<Vec<FileNode>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerConfigParams {
     pub display_name: String,
     pub server_type: String,
@@ -46,6 +54,26 @@ pub enum ClientRequest {
     ListServers,
     StartServer {
         id: String,
+    },
+    ListPackwizFiles {
+        id: String,
+    },
+    CreateDirectory {
+        id: String,
+        path: String,
+    },
+    ReadFile {
+        id: String,
+        path: String,
+    },
+    WriteFile {
+        id: String,
+        path: String,
+        content: String,
+    },
+    DeleteFile {
+        id: String,
+        path: String,
     },
     SendConsoleCommand {
         id: String,
@@ -120,6 +148,15 @@ pub enum ServerEvent {
     ConsoleResponse {
         id: String,
         response: String,
+    },
+    PackwizFilesList {
+        id: String,
+        files: Vec<FileNode>,
+    },
+    FileContent {
+        id: String,
+        path: String,
+        content: Option<String>,
     },
     LogLine {
         id: String,
