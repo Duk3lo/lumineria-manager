@@ -3,6 +3,7 @@ mod docker;
 mod installer;
 mod publisher;
 mod system;
+mod rcon;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -46,6 +47,15 @@ fn expand_tilde(path: &str) -> PathBuf {
     PathBuf::from(path)
 }
 
+fn normalize_base_url(raw: &str) -> String {
+    let trimmed = raw.trim().trim_end_matches('/');
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{trimmed}")
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -61,6 +71,7 @@ async fn main() -> anyhow::Result<()> {
             domain,
         } => {
             let root = root.canonicalize()?;
+            let domain = normalize_base_url(&domain);
             let publish_target = match vps_ssh_host {
                 Some(host) => publisher::PublishTarget::Ssh {
                     ssh_host: host,

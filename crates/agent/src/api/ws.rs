@@ -242,8 +242,11 @@ async fn handle_request(
                     step: "Iniciando instalación".into(),
                     percentage: 5,
                 });
-                if config::write_server_env(&dest_dir, &cfg).await.is_err()
-                    || config::write_server_properties(&dest_dir, &cfg)
+                let rcon_creds = config::rcon_credentials_for(&cfg);
+                if config::write_server_env(&dest_dir, &cfg, &rcon_creds)
+                    .await
+                    .is_err()
+                    || config::write_server_properties(&dest_dir, &cfg, &rcon_creds)
                         .await
                         .is_err()
                 {
@@ -761,12 +764,13 @@ async fn handle_request(
             });
         }
 
-        ClientRequest::PublishPackwiz { id, pack_key } => {
+        ClientRequest::PublishPackwiz { id, pack_key, image } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             let target_clone = state.publish_target.clone();
             let domain_clone = state.domain.clone();
             tokio::spawn(async move {
+                let pack_key = crate::docker::discovery::sanitize_container_name(&pack_key);
                 let dest_dir = root_clone.join(&id);
                 let pack_dir = dest_dir.join("packwiz");
                 let database_dir = root_clone.join("lumineria_database");
@@ -839,6 +843,56 @@ async fn handle_request(
                     }
                 }
 
+                let images_dir = root_clone.join("lumineria_database").join("images");
+                let _ = tokio::fs::create_dir_all(&images_dir).await;
+
+                let image_filename = if let Some(img) = image {
+                    use base64::{engine::general_purpose::STANDARD, Engine as _};
+                    match STANDARD.decode(&img.data_base64) {
+                        Ok(bytes) => {
+                            let ext = std::path::Path::new(&img.filename)
+                                .extension()
+                                .and_then(|e| e.to_str())
+                                .unwrap_or("png");
+                            let saved_name = format!("{}.{}", pack_key, ext);
+                            match tokio::fs::write(images_dir.join(&saved_name), bytes).await {
+                                Ok(_) => {
+                                    let _ = tx_clone.send(ServerEvent::PackwizLog {
+                                        id: id.clone(),
+                                        line: format!(
+                                            "🖼️ Imagen de portada guardada como '{}'.",
+                                            saved_name
+                                        ),
+                                    });
+                                    saved_name
+                                }
+                                Err(e) => {
+                                    let _ = tx_clone.send(ServerEvent::PackwizLog {
+                        id: id.clone(),
+                        line: format!("⚠️ No pude guardar la imagen ({e}), uso la anterior o la de por defecto."),
+                    });
+                                    existing_image_filename(&images_dir, &pack_key)
+                                        .await
+                                        .unwrap_or_else(|| "smp.png".to_string())
+                                }
+                            }
+                        }
+                        Err(_) => {
+                            let _ = tx_clone.send(ServerEvent::PackwizLog {
+                id: id.clone(),
+                line: "⚠️ Error decodificando la imagen enviada, uso la anterior o la de por defecto.".into(),
+            });
+                            existing_image_filename(&images_dir, &pack_key)
+                                .await
+                                .unwrap_or_else(|| "smp.png".to_string())
+                        }
+                    }
+                } else {
+                    existing_image_filename(&images_dir, &pack_key)
+                        .await
+                        .unwrap_or_else(|| "smp.png".to_string())
+                };
+
                 let entry = crate::installer::packwiz_db::ModpackEntry {
                     title,
                     mc_version: mc_version.clone(),
@@ -846,8 +900,8 @@ async fn handle_request(
                     java_version: 21,
                     loader_name: server_type.to_uppercase(),
                     loader_url: "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.219/neoforge-21.1.219-installer.jar".to_string(),
-                    packwiz_url: format!("https://{}/{}/pack.toml", domain_clone, pack_key),
-                    image: format!("https://{}/images/smp.png", domain_clone),
+                    packwiz_url: format!("{}/{}/pack.toml", domain_clone, pack_key),
+                    image: format!("{}/images/{}", domain_clone, image_filename),
                 };
 
                 if let Err(e) =
@@ -1029,8 +1083,8 @@ async fn handle_request(
             let root_clone = state.root.clone();
             let target_clone = state.publish_target.clone();
             tokio::spawn(async move {
+                let pack_key = crate::docker::discovery::sanitize_container_name(&pack_key);
                 let database_dir = root_clone.join("lumineria_database");
-
                 let _ = tx_clone.send(ServerEvent::PackwizLog {
                     id: id.clone(),
                     line: format!("> Quitando publicación de '{}'...", pack_key),
@@ -1076,6 +1130,71 @@ async fn handle_request(
                 }
             });
         }
+
+        ClientRequest::SendConsoleCommand { id, command } => {
+            let tx_clone = tx.clone();
+            let root_clone = state.root.clone();
+            tokio::spawn(async move {
+                let env_path = root_clone.join(&id).join("server.env");
+                let env_data = match fs::read_to_string(&env_path).await {
+                    Ok(d) => d,
+                    Err(_) => {
+                        let _ = tx_clone.send(ServerEvent::Error {
+                            message: "No encontré la configuración del servidor.".into(),
+                        });
+                        return;
+                    }
+                };
+
+                let rcon_port: u16 = read_env_value(&env_data, "RCON_PORT")
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(25575);
+                let rcon_password = match read_env_value(&env_data, "RCON_PASSWORD") {
+                    Some(p) if !p.is_empty() => p,
+                    _ => {
+                        let _ = tx_clone.send(ServerEvent::Error {
+                    message: "Este servidor no tiene RCON configurado (creálo de nuevo para tenerlo).".into(),
+                });
+                        return;
+                    }
+                };
+
+                if !podman::is_running(&id).await {
+                    let _ = tx_clone.send(ServerEvent::Error {
+                        message: "El servidor está detenido, iniciálo antes de mandar comandos."
+                            .into(),
+                    });
+                    return;
+                }
+
+                match crate::rcon::RconClient::connect("127.0.0.1", rcon_port, &rcon_password).await
+                {
+                    Ok(mut client) => match client.command(&command).await {
+                        Ok(response) => {
+                            let clean = if response.trim().is_empty() {
+                                "(sin salida)".to_string()
+                            } else {
+                                response.trim().to_string()
+                            };
+                            let _ = tx_clone.send(ServerEvent::ConsoleResponse {
+                                id,
+                                response: clean,
+                            });
+                        }
+                        Err(e) => {
+                            let _ = tx_clone.send(ServerEvent::Error {
+                                message: format!("Error ejecutando comando: {e}"),
+                            });
+                        }
+                    },
+                    Err(e) => {
+                        let _ = tx_clone.send(ServerEvent::Error {
+                            message: format!("No pude conectar al RCON: {e}"),
+                        });
+                    }
+                }
+            });
+        }
     }
 }
 
@@ -1090,4 +1209,26 @@ fn run_action(tx: &mpsc::UnboundedSender<ServerEvent>, id: &str, result: Result<
         },
     };
     let _ = tx.send(event);
+}
+
+fn read_env_value(env_data: &str, key: &str) -> Option<String> {
+    let prefix = format!("{key}=");
+    env_data.lines().find_map(|line| {
+        line.strip_prefix(&prefix)
+            .map(|v| v.trim().trim_matches('"').to_string())
+    })
+}
+
+async fn existing_image_filename(images_dir: &std::path::Path, pack_key: &str) -> Option<String> {
+    let mut entries = tokio::fs::read_dir(images_dir).await.ok()?;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        let path = entry.path();
+        if path.file_stem().and_then(|s| s.to_str()) == Some(pack_key) {
+            return path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string());
+        }
+    }
+    None
 }

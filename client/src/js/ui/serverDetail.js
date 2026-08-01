@@ -1,9 +1,10 @@
 import {
     sendAction, confirmDelete, openServerFolder,
     addMod, removeMod, uploadMod, publishModpack,
-    listPackwizMods, unpublishModpack
+    listPackwizMods, unpublishModpack, sendConsoleCommand
 } from '../features/actions.js';
 import { openLogs, closeLogs } from '../features/logs.js';
+import { appendLine } from '../features/logs.js';
 
 export let currentServerId = null;
 
@@ -16,6 +17,23 @@ const badgeEl = document.getElementById('detail-badge');
 const statusTextEl = document.getElementById('detail-status-text');
 
 export function initServerDetail() {
+
+    const btnConsoleSend = document.getElementById('btn-console-send');
+    const consoleInput = document.getElementById('console-cmd-input');
+    if (btnConsoleSend && consoleInput) {
+        const send = () => {
+            const cmd = consoleInput.value.trim();
+            if (!cmd) return;
+            appendLine(`> ${cmd}`);
+            sendConsoleCommand(currentServerId, cmd);
+            consoleInput.value = '';
+        };
+        btnConsoleSend.onclick = send;
+        consoleInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') send();
+        });
+    }
+
     // Botón Volver
     const btnBack = document.getElementById('btn-back-grid');
     if (btnBack) {
@@ -141,8 +159,23 @@ export function initServerDetail() {
     if (btnPublish) {
         btnPublish.onclick = () => {
             const packKey = document.getElementById('pw-publish-input').value.trim();
-            if (packKey) publishModpack(currentServerId, packKey);
-            else alert("Escribe el nombre de la carpeta destino (Ej: lumineria_1_21)");
+            if (!packKey) return alert("Escribe el nombre de la carpeta destino (Ej: lumineria_1_21)");
+
+            const imageInput = document.getElementById('pw-publish-image');
+            const file = imageInput && imageInput.files.length > 0 ? imageInput.files[0] : null;
+
+            if (!file) {
+                publishModpack(currentServerId, packKey, null);
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = () => {
+                const base64 = reader.result.split(',')[1];
+                publishModpack(currentServerId, packKey, { filename: file.name, data_base64: base64 });
+                imageInput.value = "";
+            };
+            reader.readAsDataURL(file);
         };
     }
 

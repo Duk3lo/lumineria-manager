@@ -40,6 +40,7 @@ pub fn run() {
             commands::servers::list_packwiz_mods,
             commands::connection::load_publish_config,
             commands::connection::save_publish_config,
+            commands::servers::send_console_command,
             // --- Versions ---
             commands::versions::fetch_neoforge_versions,
             commands::versions::fetch_forge_versions,

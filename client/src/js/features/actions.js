@@ -70,9 +70,9 @@ export async function uploadMod(id, filename, dataBase64, folder) {
     updateStatus("Subiendo archivo...", "#f9e2af");
     await invoke('upload_mod_packwiz', { id, filename, dataBase64, folder });
 }
-export async function publishModpack(id, packKey) {
+export async function publishModpack(id, packKey, image = null) {
     updateStatus("Publicando en VPS...", "#f9e2af");
-    await invoke('publish_packwiz', { id, packKey });
+    await invoke('publish_packwiz', { id, packKey, image });
 }
 
 export async function unpublishModpack(id, packKey) {
@@ -82,6 +82,11 @@ export async function unpublishModpack(id, packKey) {
 
 export async function listPackwizMods(id) {
     await invoke('list_packwiz_mods', { id });
+}
+
+export async function sendConsoleCommand(id, command) {
+    if (!command) return;
+    await invoke('send_console_command', { id, command });
 }
 
 // Vinculación global para que el HTML pueda llamar las funciones

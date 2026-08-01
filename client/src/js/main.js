@@ -44,6 +44,10 @@ document.addEventListener("DOMContentLoaded", async () => {
             if (data.id === currentServerId) {
                 renderPackwizMods(data.mods);
             }
+        } else if (data.type === "console_response") {
+            if (data.id === currentServerId) {
+                appendLine(data.response);
+            }
         }
     });
 

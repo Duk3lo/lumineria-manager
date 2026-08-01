@@ -35,11 +35,21 @@ pub struct ServerConfigParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PackwizImage {
+    pub filename: String,
+    pub data_base64: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientRequest {
     ListServers,
     StartServer {
         id: String,
+    },
+    SendConsoleCommand {
+        id: String,
+        command: String,
     },
     StopServer {
         id: String,
@@ -87,6 +97,7 @@ pub enum ClientRequest {
     PublishPackwiz {
         id: String,
         pack_key: String,
+        image: Option<PackwizImage>,
     },
     UnpublishPackwiz {
         id: String,
@@ -105,6 +116,10 @@ pub enum ClientRequest {
 pub enum ServerEvent {
     Servers {
         servers: Vec<ServerInfo>,
+    },
+    ConsoleResponse {
+        id: String,
+        response: String,
     },
     LogLine {
         id: String,

@@ -60,8 +60,8 @@ pub async fn upload_mod_packwiz(state: tauri::State<'_, AppState>, id: String, f
     send(&state, ClientRequest::UploadModPackwiz { id, filename, data_base64, folder }).await
 }
 #[tauri::command]
-pub async fn publish_packwiz(state: tauri::State<'_, AppState>, id: String, pack_key: String) -> Result<(), String> {
-    send(&state, ClientRequest::PublishPackwiz { id, pack_key }).await
+pub async fn publish_packwiz(state: tauri::State<'_, AppState>, id: String, pack_key: String, image: Option<protocol::PackwizImage>) -> Result<(), String> {
+    send(&state, ClientRequest::PublishPackwiz { id, pack_key, image }).await
 }
 
 #[tauri::command]
@@ -96,6 +96,15 @@ pub async fn recreate_container(state: State<'_, AppState>, id: String) -> Resul
 #[tauri::command]
 pub async fn delete_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
     send(&state, ClientRequest::DeleteServer { id }).await
+}
+
+#[tauri::command]
+pub async fn send_console_command(
+    state: State<'_, AppState>,
+    id: String,
+    command: String,
+) -> Result<(), String> {
+    send(&state, ClientRequest::SendConsoleCommand { id, command }).await
 }
 
 #[tauri::command]
