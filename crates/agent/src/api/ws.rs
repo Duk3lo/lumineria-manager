@@ -11,9 +11,10 @@ use axum::{
     routing::get,
     Router,
 };
+use tokio::sync::Mutex;
 use futures_util::{SinkExt, StreamExt};
 use protocol::{ClientRequest, ServerEvent};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
@@ -26,6 +27,7 @@ struct AppState {
     publish_target: Arc<crate::publisher::PublishTarget>,
     domain: Arc<String>,
     token: Arc<String>,
+    busy: Arc<Mutex<HashSet<String>>>,
 }
 
 pub async fn serve(
@@ -33,13 +35,14 @@ pub async fn serve(
     bind: String,
     publish_target: crate::publisher::PublishTarget,
     domain: String,
-    token: String, // 👈 nuevo param
+    token: String,
 ) -> Result<()> {
     let state = AppState {
         root: Arc::new(root),
         publish_target: Arc::new(publish_target),
         domain: Arc::new(domain),
         token: Arc::new(token),
+        busy: Arc::new(Mutex::new(HashSet::new())),
     };
     let app = Router::new()
         .route("/ws", get(ws_handler))
@@ -886,7 +889,13 @@ async fn handle_request(
             let root_clone = state.root.clone();
             let target_clone = state.publish_target.clone();
             let domain_clone = state.domain.clone();
+            let busy_clone = state.busy.clone();
+            let id_for_guard = id.clone();
+            let tx_for_guard = tx.clone();
             tokio::spawn(async move {
+                
+                with_busy_guard(busy_clone, id_for_guard, &tx_for_guard, async move {
+                
                 let pack_key = crate::docker::discovery::sanitize_container_name(&pack_key);
                 let dest_dir = root_clone.join(&id);
                 let pack_dir = dest_dir.join("packwiz");
@@ -1115,8 +1124,9 @@ async fn handle_request(
                             line: format!("❌ Error en publicación: {}", e),
                         });
                     }
-                }
+                }}).await;
             });
+        
         }
 
         ClientRequest::ListPackwizMods { id } => {
@@ -1444,28 +1454,19 @@ async fn handle_request(
             });
         }
 
-        ClientRequest::UpdateServer {
-            id,
-            loader_version,
-            update_mods,
-            update_engine,
-            force,
-        } => {
+        ClientRequest::UpdateServer { id, loader_version, update_mods, update_engine, force } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
-            tokio::spawn(async move {
-                update_server(
-                    id,
-                    loader_version,
-                    update_mods,
-                    update_engine,
-                    force,
-                    root_clone,
-                    tx_clone,
-                )
-                .await;
-            });
-        }
+            let busy_clone = state.busy.clone();
+            let id_for_guard = id.clone();
+            let tx_for_guard = tx.clone();
+
+    tokio::spawn(async move {
+        with_busy_guard(busy_clone, id_for_guard, &tx_for_guard, async move {
+            update_server(id, loader_version, update_mods, update_engine, force, root_clone, tx_clone).await;
+        }).await;
+    });
+}
     }
 }
 
@@ -1890,4 +1891,28 @@ async fn clean_engine_files(dest_dir: &std::path::Path) -> std::io::Result<()> {
         let _ = tokio::fs::remove_dir_all(&libraries).await;
     }
     Ok(())
+}
+
+async fn with_busy_guard<F>(
+    busy: Arc<Mutex<HashSet<String>>>,
+    id: String,
+    tx: &mpsc::UnboundedSender<ServerEvent>,
+    fut: F,
+) where
+    F: std::future::Future<Output = ()>,
+{
+    {
+        let mut set = busy.lock().await;
+        if !set.insert(id.clone()) {
+            let _ = tx.send(ServerEvent::Error {
+                message: format!(
+                    "Ya hay una operación en curso para '{}'. Esperá a que termine.",
+                    id
+                ),
+            });
+            return;
+        }
+    }
+    fut.await;
+    busy.lock().await.remove(&id);
 }

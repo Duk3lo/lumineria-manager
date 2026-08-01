@@ -6,11 +6,14 @@ use tokio::process::Command;
 use tokio::sync::mpsc;
 
 pub async fn container_action(action: &str, container_id: &str) -> Result<()> {
-    let status = Command::new("podman")
-        .arg(action)
-        .arg(container_id)
-        .status()
-        .await?;
+    let mut cmd = Command::new("podman");
+    cmd.arg(action);
+    if action == "stop" || action == "restart" {
+        cmd.args(["-t", "60"]);
+    }
+    cmd.arg(container_id);
+
+    let status = cmd.status().await?;
     if !status.success() {
         bail!(
             "podman {action} {container_id} falló (código {:?})",
@@ -56,7 +59,9 @@ pub async fn stream_logs(container_id: String, tx: mpsc::UnboundedSender<String>
     let out_task = tokio::spawn(async move {
         let mut reader = BufReader::new(stdout).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            if tx_out.send(line).is_err() { break; }
+            if tx_out.send(line).is_err() {
+                break;
+            }
         }
     });
 
@@ -64,7 +69,9 @@ pub async fn stream_logs(container_id: String, tx: mpsc::UnboundedSender<String>
     let err_task = tokio::spawn(async move {
         let mut reader = BufReader::new(stderr).lines();
         while let Ok(Some(line)) = reader.next_line().await {
-            if tx_err.send(line).is_err() { break; }
+            if tx_err.send(line).is_err() {
+                break;
+            }
         }
     });
 
@@ -121,7 +128,7 @@ pub async fn create_container(id: &str, dest_dir: &Path, image: &str) -> Result<
     if !status.success() {
         bail!("podman create falló para {id} (código {:?})", status.code());
     }
-    
+
     Ok(())
 }
 
@@ -153,9 +160,7 @@ pub async fn is_running(container_id: &str) -> bool {
         .output()
         .await;
     match output {
-        Ok(out) if out.status.success() => {
-            String::from_utf8_lossy(&out.stdout).trim() == "true"
-        }
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim() == "true",
         _ => false,
     }
 }
