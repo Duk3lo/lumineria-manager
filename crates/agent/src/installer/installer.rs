@@ -19,10 +19,51 @@ pub async fn download_file(
     step_name: &str,
     tx: &mpsc::UnboundedSender<ServerEvent>,
 ) -> Result<()> {
-    let response = client.get(url).header("User-Agent", UA).send().await?;
+    const MAX_RETRIES: u32 = 3;
+    let mut last_err: Option<anyhow::Error> = None;
+
+    for attempt in 1..=MAX_RETRIES {
+        match try_download_once(client, url, dest, server_id, step_name, tx).await {
+            Ok(()) => return Ok(()),
+            Err(e) => {
+                let _ = tx.send(ServerEvent::PackwizLog {
+                    id: server_id.to_string(),
+                    line: format!("⚠️ Intento {attempt}/{MAX_RETRIES} falló descargando {url}: {e}"),
+                });
+                last_err = Some(e);
+                if attempt < MAX_RETRIES {
+                    tokio::time::sleep(std::time::Duration::from_secs(2 * attempt as u64)).await;
+                }
+            }
+        }
+    }
+
+    let e = last_err.unwrap();
+    let chain: Vec<String> = e.chain().map(|c| c.to_string()).collect();
+    bail!("No pude descargar {url} tras {MAX_RETRIES} intentos. Causa: {}", chain.join(" → "));
+}
+
+
+async fn try_download_once(
+    client: &reqwest::Client,
+    url: &str,
+    dest: &Path,
+    server_id: &str,
+    step_name: &str,
+    tx: &mpsc::UnboundedSender<ServerEvent>,
+) -> Result<()> {
+    let response = client
+        .get(url)
+        .header("User-Agent", UA)
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .context("error de red conectando al servidor de descarga")?;
+
     if !response.status().is_success() {
         bail!("Fallo HTTP: {}", response.status());
     }
+
     let mut tmp_name = dest.file_name().unwrap_or_default().to_os_string();
     tmp_name.push(".part");
     let tmp_dest = dest.with_file_name(tmp_name);
@@ -33,10 +74,9 @@ pub async fn download_file(
     let mut downloaded: u64 = 0;
     let mut last_percentage: Option<u8> = None;
     while let Some(item) = futures_util::StreamExt::next(&mut stream).await {
-        let chunk = item?;
+        let chunk = item.context("error leyendo datos durante la descarga")?;
         file.write_all(&chunk).await?;
         downloaded += chunk.len() as u64;
-
         if total_size > 0 {
             let percentage = ((downloaded as f32 / total_size as f32) * 100.0) as u8;
             if last_percentage.map_or(true, |p| percentage >= p + 5) || percentage == 100 {
@@ -49,14 +89,11 @@ pub async fn download_file(
             }
         }
     }
-
     file.flush().await?;
     drop(file);
     fs::rename(&tmp_dest, dest).await?;
-
     Ok(())
 }
-
 pub async fn install_fabric(
     client: &reqwest::Client,
     mc_version: &str,
