@@ -49,8 +49,9 @@ export async function restoreLastConnection() {
 
 export function initConnection() {
     document.getElementById('btn-pick-folder').onclick = async () => {
-        STATE.selectedFolder = await invoke('pick_folder');
-        if (STATE.selectedFolder) {
+        const picked = await invoke('pick_folder');
+        if (picked) {
+            STATE.selectedFolder = picked;
             document.getElementById('folder-path').innerText = STATE.selectedFolder;
             document.getElementById('btn-start-local').disabled = false;
         }
