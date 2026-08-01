@@ -15,6 +15,7 @@ pub struct LastConnection {
 pub struct PublishConfig {
     pub ssh_host: Option<String>,
     pub remote_base: String,
+    pub domain: String,
 }
 
 impl Default for PublishConfig {
@@ -22,6 +23,7 @@ impl Default for PublishConfig {
         Self {
             ssh_host: None,
             remote_base: "~/lumineria".to_string(),
+            domain: "localhost".to_string(),
         }
     }
 }
@@ -48,9 +50,10 @@ pub async fn save_publish_config(
     app: AppHandle,
     ssh_host: Option<String>,
     remote_base: String,
+    domain: String, // 👈 NUEVO
 ) -> Result<(), String> {
     let path = publish_config_path(&app)?;
-    let cfg = PublishConfig { ssh_host, remote_base };
+    let cfg = PublishConfig { ssh_host, remote_base, domain }; // 👈 NUEVO
     let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }

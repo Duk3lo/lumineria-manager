@@ -37,13 +37,16 @@ pub async fn run_stack_script(root: &Path, script: &str) -> Result<()> {
     }
     Ok(())
 }
+
 pub async fn sync_mods_now(container_id: &str) -> Result<()> {
     container_action("restart", container_id).await
 }
 
 pub async fn stream_logs(container_id: String, tx: mpsc::UnboundedSender<String>) -> Result<()> {
-    let mut child = Command::new("podman")
-        .args(["logs", "-f", "--tail", "100", &container_id])
+    let cmd = format!("podman logs -f --tail 100 {} 2>&1", container_id);
+    let mut child = Command::new("bash")
+        .arg("-c")
+        .arg(&cmd)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()?;
@@ -58,23 +61,6 @@ pub async fn stream_logs(container_id: String, tx: mpsc::UnboundedSender<String>
         }
     }
 
-    Ok(())
-}
-
-pub async fn ensure_network() -> Result<()> {
-    let exists = Command::new("podman")
-        .args(["network", "exists", "lumineria-net"])
-        .status()
-        .await?;
-    if !exists.success() {
-        let status = Command::new("podman")
-            .args(["network", "create", "lumineria-net"])
-            .status()
-            .await?;
-        if !status.success() {
-            bail!("no pude crear la red podman 'lumineria-net'");
-        }
-    }
     Ok(())
 }
 
@@ -96,14 +82,11 @@ pub fn java_image_for(server_type: &str, mc_version: &str) -> &'static str {
     }
 }
 
-pub async fn create_container(id: &str, dest_dir: &Path, port: u16, image: &str) -> Result<()> {
-    ensure_network().await?;
-
-    // idempotente: si ya existía, lo tiramos y lo recreamos
+pub async fn create_container(id: &str, dest_dir: &Path, image: &str) -> Result<()> {
+    // Idempotente: si ya existía, lo borramos y lo recreamos
     let _ = Command::new("podman").args(["rm", "-f", id]).status().await;
 
     let volume = format!("{}:/data:Z", dest_dir.display());
-    let port_map = format!("{0}:{0}/tcp", port);
 
     let status = Command::new("podman")
         .args([
@@ -111,12 +94,10 @@ pub async fn create_container(id: &str, dest_dir: &Path, port: u16, image: &str)
             "--name",
             id,
             "--network",
-            "lumineria-net",
+            "host", // 👈 Red 'host' para exponer todos los puertos automáticamente
             "--userns=keep-id",
             "-v",
             &volume,
-            "-p",
-            &port_map,
             "--restart",
             "unless-stopped",
             image,
@@ -129,6 +110,7 @@ pub async fn create_container(id: &str, dest_dir: &Path, port: u16, image: &str)
     if !status.success() {
         bail!("podman create falló para {id} (código {:?})", status.code());
     }
+    
     Ok(())
 }
 
@@ -152,4 +134,17 @@ pub async fn delete_container(container_id: &str) -> Result<()> {
         }
     }
     Ok(())
+}
+
+pub async fn is_running(container_id: &str) -> bool {
+    let output = Command::new("podman")
+        .args(["inspect", "-f", "{{.State.Running}}", container_id])
+        .output()
+        .await;
+    match output {
+        Ok(out) if out.status.success() => {
+            String::from_utf8_lossy(&out.stdout).trim() == "true"
+        }
+        _ => false,
+    }
 }

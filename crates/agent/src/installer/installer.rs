@@ -1,7 +1,7 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use protocol::ServerEvent;
 use serde_json::Value;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use tokio::fs;
 use tokio::io::AsyncWriteExt;
@@ -145,20 +145,31 @@ pub async fn install_fabric(
 
     let _ = tx.send(ServerEvent::InstallProgress {
         id: server_id.to_string(),
-        step: "Ejecutando instalador de Fabric y descargando Minecraft...".to_string(),
+        step: "Ejecutando instalador de Fabric en Podman...".to_string(),
         percentage: 60,
     });
 
-    let mut child = Command::new("java")
-        .arg("-jar")
-        .arg(&installer_path)
-        .arg("server")
-        .arg("-mcVersion")
-        .arg(mc_version)
-        .arg("-loader")
-        .arg(loader_version)
-        .arg("-downloadMinecraft")
-        .current_dir(dest_dir)
+    let vol_data = format!("{}:/data:Z", dest_dir.display());
+
+    let mut child = Command::new("podman")
+        .args([
+            "run",
+            "--rm",
+            "--network", "host",
+            "--userns=keep-id",
+            "-v", &vol_data,
+            "-w", "/data",
+            "docker.io/library/eclipse-temurin:21-jre",
+            "java",
+            "-jar",
+            "fabric-installer.jar",
+            "server",
+            "-mcVersion",
+            mc_version,
+            "-loader",
+            loader_version,
+            "-downloadMinecraft"
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
@@ -166,7 +177,7 @@ pub async fn install_fabric(
     let status = child.wait().await?;
 
     if !status.success() {
-        bail!("Fallo en la ejecución de fabric-installer.");
+        bail!("Fallo en la ejecución de fabric-installer en Podman.");
     }
 
     let _ = fs::remove_file(installer_path).await;
@@ -204,22 +215,33 @@ pub async fn install_mod_installer(
 
     let _ = tx.send(ServerEvent::InstallProgress {
         id: server_id.to_string(),
-        step: "Extrayendo librerías de Minecraft... (Esto tomará un momento)".to_string(),
+        step: "Extrayendo librerías en Podman... (Tomará un momento)".to_string(),
         percentage: 50,
     });
 
-    let mut child = Command::new("java")
-        .arg("-jar")
-        .arg(&installer_path)
-        .arg("--installServer")
-        .current_dir(dest_dir)
+    let vol_data = format!("{}:/data:Z", dest_dir.display());
+
+    let mut child = Command::new("podman")
+        .args([
+            "run",
+            "--rm",
+            "--network", "host",
+            "--userns=keep-id",
+            "-v", &vol_data,
+            "-w", "/data",
+            "docker.io/library/eclipse-temurin:21-jre",
+            "java",
+            "-jar",
+            installer_name,
+            "--installServer"
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()?;
 
     let status = child.wait().await?;
     if !status.success() {
-        bail!("Fallo en la instalación del cargador de mods.");
+        bail!("Fallo en la instalación del cargador de mods en Podman.");
     }
 
     let _ = fs::remove_file(installer_path).await;
@@ -276,4 +298,88 @@ pub async fn write_start_script(
 
 pub async fn write_start_script_run_sh(dest_dir: &Path) -> Result<()> {
     write_launch_script(dest_dir, "#!/bin/sh\ncd /data\nexec sh run.sh nogui\n").await
+}
+
+const PACKWIZ_INSTALLER_BOOTSTRAP_URL: &str = "https://github.com/packwiz/packwiz-installer-bootstrap/releases/download/v0.0.3/packwiz-installer-bootstrap.jar";
+
+async fn ensure_installer_bootstrap(client: &reqwest::Client) -> Result<PathBuf> {
+    let home = std::env::var("HOME").context("no pude leer $HOME")?;
+    let cache_dir = PathBuf::from(home).join(".cache").join("lumineria");
+    fs::create_dir_all(&cache_dir).await?;
+    let jar_path = cache_dir.join("packwiz-installer-bootstrap.jar");
+
+    if jar_path.is_file() {
+        return Ok(jar_path);
+    }
+
+    let bytes = client
+        .get(PACKWIZ_INSTALLER_BOOTSTRAP_URL)
+        .send()
+        .await?
+        .bytes()
+        .await?;
+    fs::write(&jar_path, &bytes).await?;
+    Ok(jar_path)
+}
+
+pub async fn sync_server_mods(
+    client: &reqwest::Client,
+    pack_toml_url: &str,
+    dest_dir: &Path,
+    id: &str,
+    tx: &mpsc::UnboundedSender<ServerEvent>,
+) -> Result<()> {
+    let bootstrap = ensure_installer_bootstrap(client).await?;
+
+    let _ = tx.send(ServerEvent::PackwizLog {
+        id: id.to_string(),
+        line: "> Descargando mods del servidor (vía Podman)...".into(),
+    });
+
+    let vol_data = format!("{}:/data:Z", dest_dir.display());
+    // Montamos el jar descargado en una ruta temporal dentro del contenedor
+    let vol_jar = format!("{}:/tmp/bootstrap.jar:z,ro", bootstrap.display());
+
+    let output = tokio::process::Command::new("podman")
+        .args([
+            "run",
+            "--rm",               // Se borra al terminar
+            "--network", "host",  // Para que tenga internet sin problemas
+            "--userns=keep-id",   // Mantiene los permisos de tu usuario Linux
+            "-v", &vol_data,
+            "-v", &vol_jar,
+            "-w", "/data",
+            "docker.io/library/eclipse-temurin:21-jre",
+            "java",
+            "-jar",
+            "/tmp/bootstrap.jar",
+            "-g",
+            "-s",
+            "server",
+            pack_toml_url,
+        ])
+        .output()
+        .await
+        .context("no pude ejecutar podman run para packwiz-installer")?;
+
+    for line in String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .chain(String::from_utf8_lossy(&output.stderr).lines())
+    {
+        if !line.trim().is_empty() {
+            let _ = tx.send(ServerEvent::PackwizLog {
+                id: id.to_string(),
+                line: line.trim().to_string(),
+            });
+        }
+    }
+
+    if !output.status.success() {
+        bail!(
+            "packwiz-installer-bootstrap terminó con error (código {:?})",
+            output.status.code()
+        );
+    }
+
+    Ok(())
 }

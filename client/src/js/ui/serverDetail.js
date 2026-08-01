@@ -44,13 +44,24 @@ export function initServerDetail() {
 
     // Botones de acción del servidor
     const btnStart = document.getElementById('btn-detail-start');
-    if (btnStart) btnStart.onclick = () => sendAction('start_server', currentServerId);
+    if (btnStart) {
+        btnStart.onclick = () => {
+            sendAction('start_server', currentServerId);
+            // Volvemos a pedir los logs después de 1.5s para asegurarnos de que el contenedor ya existe
+            setTimeout(() => openLogs(currentServerId), 1500);
+        };
+    }
 
     const btnStop = document.getElementById('btn-detail-stop');
     if (btnStop) btnStop.onclick = () => sendAction('stop_server', currentServerId);
 
     const btnRestart = document.getElementById('btn-detail-restart');
-    if (btnRestart) btnRestart.onclick = () => sendAction('restart_server', currentServerId);
+    if (btnRestart) {
+        btnRestart.onclick = () => {
+            sendAction('restart_server', currentServerId);
+            setTimeout(() => openLogs(currentServerId), 1500);
+        };
+    }
 
     const btnDelete = document.getElementById('btn-detail-delete');
     if (btnDelete) {

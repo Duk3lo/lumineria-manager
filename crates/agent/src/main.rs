@@ -32,6 +32,8 @@ enum Command {
         vps_ssh_host: Option<String>,
         #[arg(long, default_value = "~/lumineria")]
         vps_remote_base: String,
+        #[arg(long, default_value = "localhost")]
+        domain: String,
     },
 }
 
@@ -56,6 +58,7 @@ async fn main() -> anyhow::Result<()> {
             bind,
             vps_ssh_host,
             vps_remote_base,
+            domain,
         } => {
             let root = root.canonicalize()?;
             let publish_target = match vps_ssh_host {
@@ -69,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
                     web_root: PathBuf::from("/var/www/html"),
                 },
             };
-            api::ws::serve(root, bind, publish_target).await?;
+            api::ws::serve(root, bind, publish_target, domain).await?;
         }
     }
 

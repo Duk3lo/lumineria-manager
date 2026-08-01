@@ -22,17 +22,20 @@ use tokio::task::JoinHandle;
 #[derive(Clone)]
 struct AppState {
     root: Arc<PathBuf>,
-    publish_target: Arc<crate::publisher::PublishTarget>, // 👈 nuevo
+    publish_target: Arc<crate::publisher::PublishTarget>,
+    domain: Arc<String>,
 }
 
 pub async fn serve(
     root: PathBuf,
     bind: String,
     publish_target: crate::publisher::PublishTarget,
+    domain: String,
 ) -> Result<()> {
     let state = AppState {
         root: Arc::new(root),
         publish_target: Arc::new(publish_target),
+        domain: Arc::new(domain),
     };
     let app = Router::new()
         .route("/ws", get(ws_handler))
@@ -188,8 +191,10 @@ async fn handle_request(
             podman::run_stack_script(&state.root, "restart-podman.sh").await,
         ),
         ClientRequest::SubscribeLogs { id } => {
-            if log_tasks.contains_key(&id) {
-                return;
+            if let Some(handle) = log_tasks.get(&id) {
+                if !handle.is_finished() {
+                    return;
+                }
             }
             let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
             let container_id = id.clone();
@@ -319,7 +324,7 @@ async fn handle_request(
                     percentage: 90,
                 });
                 let image = podman::java_image_for(&cfg.server_type, &cfg.mc_version);
-                match podman::create_container(&id, &dest_dir, cfg.port, image).await {
+                match podman::create_container(&id, &dest_dir, image).await {
                     Ok(()) => {
                         let _ = tx_clone.send(ServerEvent::Ack {
                             ok: true,
@@ -461,7 +466,6 @@ async fn handle_request(
 
                 let mut server_type = "paper".to_string();
                 let mut mc_version = "latest".to_string();
-                let mut port: u16 = 25565;
 
                 for line in env_data.lines() {
                     if line.starts_with("SERVER_TYPE=") {
@@ -482,16 +486,6 @@ async fn handle_request(
                             .trim()
                             .to_string();
                     }
-                    if line.starts_with("SERVER_PORT=") {
-                        port = line
-                            .split('=')
-                            .nth(1)
-                            .unwrap_or("25565")
-                            .replace('"', "")
-                            .trim()
-                            .parse()
-                            .unwrap_or(25565);
-                    }
                 }
 
                 if !dest_dir.join("start.sh").exists() {
@@ -502,7 +496,7 @@ async fn handle_request(
                 }
 
                 let image = podman::java_image_for(&server_type, &mc_version);
-                match podman::create_container(&id, &dest_dir, port, image).await {
+                match podman::create_container(&id, &dest_dir, image).await {
                     Ok(()) => {
                         let _ = tx_clone.send(ServerEvent::Ack {
                             ok: true,
@@ -522,7 +516,6 @@ async fn handle_request(
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             tokio::spawn(async move {
-                // AQUÍ ES DONDE SE USA LA FUNCIÓN QUE TE MARCABA EL WARNING
                 if let Err(e) = podman::delete_container(&id).await {
                     tracing::warn!("Problema al borrar contenedor {id}: {e}");
                 }
@@ -563,7 +556,6 @@ async fn handle_request(
                 let packwiz_bin = crate::system::deps::find_in_path("packwiz")
                     .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
 
-                // 1. AUTO-INICIALIZACIÓN SI NO EXISTE
                 if let Err(e) =
                     ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx_clone)
                         .await
@@ -575,7 +567,6 @@ async fn handle_request(
                     return;
                 }
 
-                // 2. AÑADIR EL MOD
                 let source = if query.contains("curseforge.com") {
                     "cf"
                 } else {
@@ -688,7 +679,6 @@ async fn handle_request(
                 use base64::{engine::general_purpose::STANDARD, Engine as _};
                 let dest_dir = root_clone.join(&id).join("packwiz");
 
-                // Detectar si el usuario quiere subir a la carpeta raíz
                 let is_root = folder.is_empty() || folder == "." || folder == "root";
 
                 let target_dir = if is_root {
@@ -728,7 +718,6 @@ async fn handle_request(
                         let packwiz_bin = crate::system::deps::find_in_path("packwiz")
                             .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
 
-                        // Si es raíz, el archivo se añade directamente. Si no, va con su subcarpeta
                         let relative_file_path = if is_root {
                             filename.clone()
                         } else {
@@ -757,7 +746,6 @@ async fn handle_request(
                             line: format!("✅ Archivo '{}' trackeado exitosamente.", filename),
                         });
 
-                        // Refrescamos lista en el frontend
                         let _ = tx_clone.send(ServerEvent::Ack {
                             ok: true,
                             message: None,
@@ -777,6 +765,7 @@ async fn handle_request(
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
             let target_clone = state.publish_target.clone();
+            let domain_clone = state.domain.clone();
             tokio::spawn(async move {
                 let dest_dir = root_clone.join(&id);
                 let pack_dir = dest_dir.join("packwiz");
@@ -788,8 +777,6 @@ async fn handle_request(
                     id: id.clone(),
                     line: format!("> Iniciando publicación de '{}'...", pack_key),
                 });
-
-                // 👇 1. REGENERAR ÍNDICES Y HASHES DE FORMA SEGURA 👇
 
                 if let Err(e) =
                     ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx_clone)
@@ -822,7 +809,6 @@ async fn handle_request(
                     }
                 }
 
-                // 2. LEER DATOS LOCALES PARA ARMAR EL JSON AUTOMÁTICAMENTE
                 let env_path = dest_dir.join("server.env");
                 let env_data = fs::read_to_string(&env_path).await.unwrap_or_default();
                 let mut title = "Servidor Lumineria".to_string();
@@ -860,8 +846,8 @@ async fn handle_request(
                     java_version: 21,
                     loader_name: server_type.to_uppercase(),
                     loader_url: "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.219/neoforge-21.1.219-installer.jar".to_string(),
-                    packwiz_url: format!("https://lumineria.duckdns.org/{}/pack.toml", pack_key),
-                    image: "https://lumineria.duckdns.org/images/smp.png".to_string(),
+                    packwiz_url: format!("https://{}/{}/pack.toml", domain_clone, pack_key),
+                    image: format!("https://{}/images/smp.png", domain_clone),
                 };
 
                 if let Err(e) =
@@ -890,15 +876,72 @@ async fn handle_request(
                     Ok(()) => {
                         let _ = tx_clone.send(ServerEvent::PackwizLog {
                             id: id.clone(),
-                            line:
-                                "🚀 Sincronización completada. El modpack está en línea en Nginx."
-                                    .into(),
+                            line: "🚀 Sincronización completada. El modpack está en línea.".into(),
+                        });
+
+                        let was_running = podman::is_running(&id).await;
+
+                        if was_running {
+                            let _ = tx_clone.send(ServerEvent::PackwizLog {
+                                id: id.clone(),
+                                line: "⏸️ Deteniendo el servidor para actualizar mods...".into(),
+                            });
+                            if let Err(e) = podman::container_action("stop", &id).await {
+                                let _ = tx_clone.send(ServerEvent::PackwizLog {
+                                    id: id.clone(),
+                                    line: format!("❌ No pude detener el contenedor, aborto la sincronización: {e}"),
+                                });
+                                return;
+                            }
+                        }
+
+                        let client = reqwest::Client::new();
+                        let sync_result = installer::sync_server_mods(
+                            &client,
+                            "packwiz/pack.toml",
+                            &dest_dir,
+                            &id,
+                            &tx_clone,
+                        )
+                        .await;
+
+                        match sync_result {
+                            Ok(()) => {
+                                let _ = tx_clone.send(ServerEvent::PackwizLog {
+                                    id: id.clone(),
+                                    line: "✅ Mods del servidor actualizados (archivos viejos eliminados).".into(),
+                                });
+                            }
+                            Err(e) => {
+                                let _ = tx_clone.send(ServerEvent::PackwizLog {
+                                    id: id.clone(),
+                                    line: format!("❌ Error al sincronizar mods del servidor: {e}"),
+                                });
+                            }
+                        }
+
+                        if was_running {
+                            let _ = tx_clone.send(ServerEvent::PackwizLog {
+                                id: id.clone(),
+                                line: "▶️ Reiniciando el servidor...".into(),
+                            });
+                            if let Err(e) = podman::container_action("start", &id).await {
+                                let _ = tx_clone.send(ServerEvent::PackwizLog {
+                                    id: id.clone(),
+                                    line: format!("❌ No pude reiniciar el contenedor: {e}"),
+                                });
+                            }
+                        }
+
+                        let _ = tx_clone.send(ServerEvent::Ack {
+                            ok: true,
+                            message: Some("Publicación y sincronización completadas".into()),
                         });
                     }
                     Err(e) => {
                         let _ = tx_clone.send(ServerEvent::PackwizLog {
                             id: id.clone(),
-                            line: format!("❌ Error en SSH/Rsync: {}", e),
+                            line: format!("❌ Error en publicación: {}", e),
                         });
                     }
                 }
@@ -912,7 +955,6 @@ async fn handle_request(
                 let packwiz_dir = root_clone.join(&id).join("packwiz");
                 let mut files_list = Vec::new();
 
-                // Escaneamos dinámicamente las carpetas clave de Packwiz
                 let categories = vec!["mods", "resourcepacks", "shaderpacks", "config"];
 
                 for category in categories {
@@ -924,7 +966,6 @@ async fn handle_request(
                     if let Ok(mut entries) = tokio::fs::read_dir(target_dir).await {
                         while let Ok(Some(entry)) = entries.next_entry().await {
                             let path = entry.path();
-                            // Packwiz trackea los archivos usando metadatos en archivos .toml
                             if path.extension().and_then(|s| s.to_str()) == Some("toml") {
                                 if let Ok(content) = tokio::fs::read_to_string(&path).await {
                                     let mut name = String::new();
@@ -962,7 +1003,6 @@ async fn handle_request(
                                         }
                                     }
                                     if !name.is_empty() {
-                                        // Guardamos la ruta relativa estructurada, ej: mods/sodium.jar o resourcepacks/fiel.zip
                                         let display_filename = format!("{}/{}", category, filename);
                                         files_list.push(protocol::PackwizMod {
                                             name,
