@@ -11,6 +11,49 @@ pub struct LastConnection {
     pub folder: Option<String>,
     pub url: Option<String>,
 }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PublishConfig {
+    pub ssh_host: Option<String>,
+    pub remote_base: String,
+}
+
+impl Default for PublishConfig {
+    fn default() -> Self {
+        Self {
+            ssh_host: None,
+            remote_base: "~/lumineria".to_string(),
+        }
+    }
+}
+
+
+fn publish_config_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("publish_config.json"))
+}
+
+#[tauri::command]
+pub async fn load_publish_config(app: AppHandle) -> Result<PublishConfig, String> {
+    let path = publish_config_path(&app)?;
+    if !path.exists() {
+        return Ok(PublishConfig::default());
+    }
+    let data = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    serde_json::from_str(&data).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_publish_config(
+    app: AppHandle,
+    ssh_host: Option<String>,
+    remote_base: String,
+) -> Result<(), String> {
+    let path = publish_config_path(&app)?;
+    let cfg = PublishConfig { ssh_host, remote_base };
+    let json = serde_json::to_string_pretty(&cfg).map_err(|e| e.to_string())?;
+    std::fs::write(&path, json).map_err(|e| e.to_string())
+}
 
 fn last_connection_path(app: &AppHandle) -> Result<std::path::PathBuf, String> {
     let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
@@ -64,32 +107,33 @@ pub async fn start_local_agent(app: AppHandle, root_path: String) -> Result<Stri
     let pid_path = agent_pid_path(&app)?;
     if let Ok(pid_str) = std::fs::read_to_string(&pid_path) {
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
-            let _ = std::process::Command::new("kill")
-                .arg("-9")
-                .arg(pid.to_string())
-                .status();
+            let _ = std::process::Command::new("kill").arg("-9").arg(pid.to_string()).status();
         }
     }
 
     let port = "127.0.0.1:8756";
-    let sidecar = app
-        .shell()
-        .sidecar("lumineria-agent")
-        .map_err(|e| e.to_string())?
-        .args(["serve", "--root", &root_path, "--bind", port]);
+    let publish_cfg = load_publish_config(app.clone()).await?;
 
+    let mut args = vec![
+        "serve".to_string(),
+        "--root".to_string(), root_path.clone(),
+        "--bind".to_string(), port.to_string(),
+        "--vps-remote-base".to_string(), publish_cfg.remote_base.clone(),
+    ];
+    if let Some(host) = &publish_cfg.ssh_host {
+        args.push("--vps-ssh-host".to_string());
+        args.push(host.clone());
+    }
+
+    let sidecar = app.shell().sidecar("lumineria-agent").map_err(|e| e.to_string())?.args(args);
     let (mut rx, child) = sidecar.spawn().map_err(|e| e.to_string())?;
     std::fs::write(&pid_path, child.pid().to_string()).map_err(|e| e.to_string())?;
 
     tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
-                tauri_plugin_shell::process::CommandEvent::Stdout(l) => {
-                    println!("[Agente Local] {}", String::from_utf8_lossy(&l))
-                }
-                tauri_plugin_shell::process::CommandEvent::Stderr(l) => {
-                    eprintln!("[Agente Local ERROR] {}", String::from_utf8_lossy(&l))
-                }
+                tauri_plugin_shell::process::CommandEvent::Stdout(l) => println!("[Agente Local] {}", String::from_utf8_lossy(&l)),
+                tauri_plugin_shell::process::CommandEvent::Stderr(l) => eprintln!("[Agente Local ERROR] {}", String::from_utf8_lossy(&l)),
                 _ => {}
             }
         }

@@ -32,6 +32,9 @@
                 style="margin: 20px; font-size: 0.9rem; padding: 10px; background-color: #a6e3a1; color: #11111b;">+
                 Crear Servidor</button>
 
+            <button id="btn-publish-settings" class="secondary-btn" style="margin: 0 20px 20px;">⚙️ Config. de
+                Publicación</button>
+
             <div class="sidebar-footer">
                 <div class="account-row">
                     <div class="account-btn" style="cursor: default;">
@@ -166,7 +169,10 @@
                                         style="flex: 1; padding: 8px;">
                                     <button id="btn-pw-publish" class="primary-btn"
                                         style="background: #cba6f7; color: #11111b;">¡Publicar!</button>
+                                    <button id="btn-pw-unpublish" class="secondary-btn"
+                                        style="color: #f38ba8; border-color: #f38ba8;">🗑 Quitar</button>
                                 </div>
+
                             </div>
                         </div>
 
@@ -287,6 +293,22 @@
                 <button id="btn-confirm-yes" class="primary-btn" style="flex:1; background-color:#f38ba8;">Sí,
                     eliminar</button>
                 <button id="btn-confirm-no" class="secondary-btn" style="flex:1;">Cancelar</button>
+            </div>
+        </div>
+    </div>
+
+
+
+    <div id="publish-settings-modal" class="modal hidden">
+        <div class="modal-content">
+            <h2>Configuración de Publicación (VPS)</h2>
+            <label>Host SSH (vacío = este agente ya corre en el VPS)</label>
+            <input type="text" id="ps-ssh-host" placeholder="usuario@ip-del-vps" />
+            <label>Ruta base remota</label>
+            <input type="text" id="ps-remote-base" placeholder="~/lumineria" />
+            <div style="margin-top: 20px; display:flex; gap:10px;">
+                <button id="btn-ps-save" class="primary-btn" style="flex:1;">Guardar</button>
+                <button id="btn-ps-cancel" class="secondary-btn" style="flex:1;">Cerrar</button>
             </div>
         </div>
     </div>

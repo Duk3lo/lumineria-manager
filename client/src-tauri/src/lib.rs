@@ -19,7 +19,6 @@ pub fn run() {
             commands::connection::connect_agent,
             commands::connection::load_last_connection,
             commands::connection::save_last_connection,
-            
             // --- Servers / Docker ---
             commands::servers::list_servers,
             commands::servers::start_server,
@@ -37,8 +36,10 @@ pub fn run() {
             commands::servers::remove_mod_packwiz,
             commands::servers::upload_mod_packwiz,
             commands::servers::publish_packwiz,
+            commands::servers::unpublish_packwiz,
             commands::servers::list_packwiz_mods,
-            
+            commands::connection::load_publish_config,
+            commands::connection::save_publish_config,
             // --- Versions ---
             commands::versions::fetch_neoforge_versions,
             commands::versions::fetch_forge_versions,

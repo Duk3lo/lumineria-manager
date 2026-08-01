@@ -57,12 +57,14 @@ pub async fn check_and_maybe_install(install: bool) -> Result<()> {
         }
     }
 
+    // 👇 movido afuera, calculado una sola vez para toda la función
+    let is_tty = std::io::stdin().is_terminal();
+    let sudo_cmd = if is_tty { "sudo" } else { "pkexec" };
+
     if !missing.is_empty() {
         if !install {
             bail!("Faltan estos paquetes: {}", missing.join(", "));
         }
-
-        let is_tty = std::io::stdin().is_terminal();
 
         if is_tty {
             print!(
@@ -78,16 +80,17 @@ pub async fn check_and_maybe_install(install: bool) -> Result<()> {
             }
         }
 
-        let sudo_cmd = if is_tty { "sudo" } else { "pkexec" };
         let pm = detect_package_manager()?;
         install_packages(pm, sudo_cmd, &missing)?;
     } else {
         println!("Todas las dependencias de sistema están presentes.");
     }
 
-    // Retorna la ruta confirmada y utilizable de packwiz
     let packwiz_path = ensure_packwiz().await?;
     tracing::info!("Binario listo en: {}", packwiz_path.display());
+
+    let pm = detect_package_manager()?;
+    ensure_web_server(sudo_cmd, pm).await?;
 
     Ok(())
 }
@@ -174,4 +177,54 @@ pub async fn ensure_packwiz() -> Result<PathBuf> {
             go_bin
         )
     }
+}
+
+async fn ensure_web_server(sudo_cmd: &str, pm: PackageManager) -> Result<()> {
+    // 1. ¿Ya hay algo activo en el puerto 80? (Apache o Nginx)
+    let apache_active = SyncCommand::new("systemctl")
+        .args(["is-active", "--quiet", "apache2"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    let nginx_active = SyncCommand::new("systemctl")
+        .args(["is-active", "--quiet", "nginx"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    if apache_active || nginx_active {
+        println!(
+            "✔ Ya hay un servidor web activo ({}), no instalo nada.",
+            if apache_active { "apache2" } else { "nginx" }
+        );
+    } else {
+        println!("No hay servidor web activo. Instalando nginx...");
+        let pkg_name = match pm {
+            PackageManager::Apt => "nginx",
+            PackageManager::Dnf => "nginx",
+        };
+        install_packages(pm, sudo_cmd, &[pkg_name])?;
+
+        let status = SyncCommand::new(sudo_cmd)
+            .args(["systemctl", "enable", "--now", "nginx"])
+            .status()
+            .context("no pude habilitar nginx")?;
+        if !status.success() {
+            bail!("systemctl enable --now nginx falló");
+        }
+    }
+
+    // 2. Asegurar que tu usuario pueda escribir en /var/www/html sin sudo
+    //    (evita el problema de sudo sin TTY dentro de publish.sh)
+    let user = std::env::var("USER").context("no pude leer $USER")?;
+    let status = SyncCommand::new(sudo_cmd)
+        .args(["chown", "-R", &format!("{user}:{user}"), "/var/www/html"])
+        .status()
+        .context("no pude ajustar permisos de /var/www/html")?;
+    if !status.success() {
+        bail!("chown sobre /var/www/html falló");
+    }
+
+    Ok(())
 }

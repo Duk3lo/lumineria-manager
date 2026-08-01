@@ -38,3 +38,18 @@ pub async fn upsert_entry(
     fs::write(json_path, json).await?;
     Ok(())
 }
+
+pub async fn remove_entry(database_dir: &Path, key: &str) -> Result<bool> {
+    let json_path = database_dir.join("modpacks.json");
+    if !json_path.exists() {
+        return Ok(false);
+    }
+    let data = fs::read_to_string(&json_path).await?;
+    let mut map: HashMap<String, ModpackEntry> = serde_json::from_str(&data).unwrap_or_default();
+    let existed = map.remove(key).is_some();
+    if existed {
+        let json = serde_json::to_string_pretty(&map)?;
+        fs::write(json_path, json).await?;
+    }
+    Ok(existed)
+}

@@ -1,7 +1,7 @@
 import {
     sendAction, confirmDelete, openServerFolder,
     addMod, removeMod, uploadMod, publishModpack,
-    listPackwizMods
+    listPackwizMods, unpublishModpack
 } from '../features/actions.js';
 import { openLogs, closeLogs } from '../features/logs.js';
 
@@ -107,7 +107,7 @@ export function initServerDetail() {
         btnUpload.onclick = () => {
             const fileInput = document.getElementById('pw-upload-input');
             const folderSelect = document.getElementById('pw-upload-folder');
-            
+
             if (!fileInput || !folderSelect) return;
             const targetFolder = folderSelect.value;
 
@@ -135,6 +135,15 @@ export function initServerDetail() {
         };
     }
 
+    const btnUnpublish = document.getElementById('btn-pw-unpublish');
+    if (btnUnpublish) {
+        btnUnpublish.onclick = () => {
+            const packKey = document.getElementById('pw-publish-input').value.trim();
+            if (packKey) unpublishModpack(currentServerId, packKey);
+            else alert("Escribe el nombre de la carpeta a quitar");
+        };
+    }
+
     const btnRefreshMods = document.getElementById('btn-pw-refresh-list');
     if (btnRefreshMods) {
         btnRefreshMods.onclick = () => listPackwizMods(currentServerId);
@@ -147,6 +156,9 @@ export async function openServerDetail(server) {
     if (titleEl) titleEl.innerText = server.display_name;
     if (badgeEl) badgeEl.innerText = `${server.server_type} ${server.mc_version}`;
     updateDetailStatus(server.status);
+
+    const publishInput = document.getElementById('pw-publish-input');
+    if (publishInput) publishInput.value = server.id;
 
     if (viewGrid) viewGrid.classList.add('hidden');
     const connView = document.getElementById('view-connection');
@@ -192,26 +204,26 @@ export function renderPackwizMods(mods) {
             </thead>
             <tbody>
                 ${mods.map(mod => {
-                    let sideBadge = "";
-                    if (mod.side === "client") {
-                        sideBadge = `<span class="badge" style="background: #89b4fa; color: #11111b; font-weight: bold; font-size:0.75rem; padding: 2px 6px; border-radius:4px;">Solo Cliente</span>`;
-                    } else if (mod.side === "server") {
-                        sideBadge = `<span class="badge" style="background: #f9e2af; color: #11111b; font-weight: bold; font-size:0.75rem; padding: 2px 6px; border-radius:4px;">Solo Servidor</span>`;
-                    } else {
-                        sideBadge = `<span class="badge" style="background: #a6e3a1; color: #11111b; font-weight: bold; font-size:0.75rem; padding: 2px 6px; border-radius:4px;">Ambos</span>`;
-                    }
+        let sideBadge = "";
+        if (mod.side === "client") {
+            sideBadge = `<span class="badge" style="background: #89b4fa; color: #11111b; font-weight: bold; font-size:0.75rem; padding: 2px 6px; border-radius:4px;">Solo Cliente</span>`;
+        } else if (mod.side === "server") {
+            sideBadge = `<span class="badge" style="background: #f9e2af; color: #11111b; font-weight: bold; font-size:0.75rem; padding: 2px 6px; border-radius:4px;">Solo Servidor</span>`;
+        } else {
+            sideBadge = `<span class="badge" style="background: #a6e3a1; color: #11111b; font-weight: bold; font-size:0.75rem; padding: 2px 6px; border-radius:4px;">Ambos</span>`;
+        }
 
-                    // Badge dinámico para identificar si es un Mod, un Config, o un ResourcePack
-                    let typeBadge = `<span style="color: #cba6f7;">📦 Mod</span>`;
-                    if (mod.filename.includes("resourcepacks/")) {
-                        typeBadge = `<span style="color: #fab387;">🎨 Texturas</span>`;
-                    } else if (mod.filename.includes("config/")) {
-                        typeBadge = `<span style="color: #94e2d5;">⚙️ Config</span>`;
-                    } else if (mod.filename.includes("shaderpacks/")) {
-                        typeBadge = `<span style="color: #f9e2af;">🔮 Shader</span>`;
-                    }
+        // Badge dinámico para identificar si es un Mod, un Config, o un ResourcePack
+        let typeBadge = `<span style="color: #cba6f7;">📦 Mod</span>`;
+        if (mod.filename.includes("resourcepacks/")) {
+            typeBadge = `<span style="color: #fab387;">🎨 Texturas</span>`;
+        } else if (mod.filename.includes("config/")) {
+            typeBadge = `<span style="color: #94e2d5;">⚙️ Config</span>`;
+        } else if (mod.filename.includes("shaderpacks/")) {
+            typeBadge = `<span style="color: #f9e2af;">🔮 Shader</span>`;
+        }
 
-                    return `
+        return `
                         <tr style="border-bottom: 1px solid #313244;">
                             <td style="padding: 8px; font-weight: bold;">${typeBadge}</td>
                             <td style="padding: 8px; color: #cdd6f4;">
@@ -221,7 +233,7 @@ export function renderPackwizMods(mods) {
                             <td style="padding: 8px; text-align: right;">${sideBadge}</td>
                         </tr>
                     `;
-                }).join('')}
+    }).join('')}
             </tbody>
         </table>
     `;

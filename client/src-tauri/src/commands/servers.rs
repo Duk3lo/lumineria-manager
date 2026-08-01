@@ -70,6 +70,11 @@ pub async fn list_packwiz_mods(state: tauri::State<'_, AppState>, id: String) ->
 }
 
 #[tauri::command]
+pub async fn unpublish_packwiz(state: tauri::State<'_, AppState>, id: String, pack_key: String) -> Result<(), String> {
+    send(&state, ClientRequest::UnpublishPackwiz { id, pack_key }).await
+}
+
+#[tauri::command]
 pub async fn create_server(
     state: State<'_, AppState>,
     id: String,

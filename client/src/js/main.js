@@ -5,8 +5,9 @@ import { initCreator } from './features/creator.js';
 import { initServerDetail, currentServerId, appendPackwizLog, renderPackwizMods } from './ui/serverDetail.js';
 import { appendLine } from './features/logs.js';
 import { renderServers, updateStatus } from './ui/serverList.js';
-import { invoke_ws_action } from './features/actions.js';
+import { invoke_ws_action, listPackwizMods } from './features/actions.js';
 import { initConfirmModal } from './ui/confirmModal.js';
+import { initPublishSettings } from './ui/publishSettings.js';
 
 document.addEventListener("DOMContentLoaded", async () => {
     initTabs();
@@ -14,6 +15,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     initConnection();
     initServerDetail();
     initConfirmModal();
+    initPublishSettings();
 
     await listen("server-event", (event) => {
         const data = event.payload;
@@ -26,6 +28,7 @@ document.addEventListener("DOMContentLoaded", async () => {
             updateStatus("Conectado", "#a6e3a1");
             if (data.message) alert("Operación completada: " + data.message);
             invoke_ws_action({ type: "list_servers" });
+            if (currentServerId) listPackwizMods(currentServerId);
         } else if (data.type === "error") {
             updateStatus("Error: " + data.message, "#f38ba8");
             alert("Error: " + data.message);
@@ -41,11 +44,6 @@ document.addEventListener("DOMContentLoaded", async () => {
             if (data.id === currentServerId) {
                 renderPackwizMods(data.mods);
             }
-        } else if (data.type === "ack") {
-            updateStatus("Conectado", "#a6e3a1");
-            if (data.message) alert("Operación completada: " + data.message);
-            invoke_ws_action({ type: "list_servers" });
-            listPackwizMods(currentServerId); // <-- REFRESCAR LISTA DE MODS AUTOMÁTICAMENTE
         }
     });
 

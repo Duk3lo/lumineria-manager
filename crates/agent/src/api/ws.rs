@@ -22,11 +22,17 @@ use tokio::task::JoinHandle;
 #[derive(Clone)]
 struct AppState {
     root: Arc<PathBuf>,
+    publish_target: Arc<crate::publisher::PublishTarget>, // 👈 nuevo
 }
 
-pub async fn serve(root: PathBuf, bind: String) -> Result<()> {
+pub async fn serve(
+    root: PathBuf,
+    bind: String,
+    publish_target: crate::publisher::PublishTarget,
+) -> Result<()> {
     let state = AppState {
         root: Arc::new(root),
+        publish_target: Arc::new(publish_target),
     };
     let app = Router::new()
         .route("/ws", get(ws_handler))
@@ -76,6 +82,67 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         handle.abort();
     }
     writer_task.abort();
+}
+
+async fn ensure_packwiz_initialized(
+    dest_dir: &std::path::Path,
+    pack_dir: &std::path::Path,
+    packwiz_bin: &std::path::Path,
+    id: &str,
+    tx: &mpsc::UnboundedSender<ServerEvent>,
+) -> anyhow::Result<()> {
+    if pack_dir.join("pack.toml").exists() {
+        return Ok(());
+    }
+    tokio::fs::create_dir_all(pack_dir).await?;
+    let _ = tx.send(ServerEvent::PackwizLog {
+        id: id.to_string(),
+        line: "⚠️ No se encontró un modpack. Auto-inicializando...".into(),
+    });
+    let env_path = dest_dir.join("server.env");
+    let env_data = fs::read_to_string(&env_path).await.unwrap_or_default();
+    let mut mc_version = "1.21.1".to_string();
+    let mut server_type = "fabric".to_string();
+    for line in env_data.lines() {
+        if line.starts_with("MC_VERSION=") {
+            mc_version = line
+                .replace("MC_VERSION=", "")
+                .replace('"', "")
+                .trim()
+                .to_string();
+        }
+        if line.starts_with("SERVER_TYPE=") {
+            server_type = line
+                .replace("SERVER_TYPE=", "")
+                .replace('"', "")
+                .trim()
+                .to_string();
+        }
+    }
+    let loader = match server_type.as_str() {
+        "paper" | "velocity" => "none",
+        other => other,
+    };
+    let status = tokio::process::Command::new(packwiz_bin)
+        .args([
+            "init",
+            "--name",
+            id,
+            "--author",
+            "Lumineria",
+            "--mc-version",
+            &mc_version,
+            "--modloader",
+            loader,
+            "-y",
+        ])
+        .current_dir(pack_dir)
+        .status()
+        .await?;
+    if !status.success() {
+        anyhow::bail!("No pude inicializar packwiz para '{}'", id);
+    }
+    Ok(())
 }
 
 async fn handle_request(
@@ -497,69 +564,15 @@ async fn handle_request(
                     .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
 
                 // 1. AUTO-INICIALIZACIÓN SI NO EXISTE
-                if !pack_dir.join("pack.toml").exists() {
-                    let _ = tokio::fs::create_dir_all(&pack_dir).await;
+                if let Err(e) =
+                    ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx_clone)
+                        .await
+                {
                     let _ = tx_clone.send(ServerEvent::PackwizLog {
                         id: id.clone(),
-                        line: "⚠️ No se encontró un modpack. Auto-inicializando...".into(),
+                        line: format!("❌ {}", e),
                     });
-
-                    // Leer datos de server.env
-                    let env_path = dest_dir.join("server.env");
-                    let env_data = fs::read_to_string(&env_path).await.unwrap_or_default();
-                    let mut mc_version = "1.21.1".to_string();
-                    let mut server_type = "fabric".to_string();
-                    for line in env_data.lines() {
-                        if line.starts_with("MC_VERSION=") {
-                            mc_version = line
-                                .replace("MC_VERSION=", "")
-                                .replace('"', "")
-                                .trim()
-                                .to_string();
-                        }
-                        if line.starts_with("SERVER_TYPE=") {
-                            server_type = line
-                                .replace("SERVER_TYPE=", "")
-                                .replace('"', "")
-                                .trim()
-                                .to_string();
-                        }
-                    }
-
-                    // Mapear motor a formato packwiz (neoforge, forge, fabric, quilt)
-                    let loader = match server_type.as_str() {
-                        "paper" | "velocity" => "none",
-                        other => other,
-                    };
-
-                    let init_status = tokio::process::Command::new(&packwiz_bin)
-                        .args([
-                            "init",
-                            "--name",
-                            &id,
-                            "--author",
-                            "Lumineria",
-                            "--mc-version",
-                            &mc_version,
-                            "--modloader",
-                            loader,
-                            "-y",
-                        ])
-                        .current_dir(&pack_dir)
-                        .status()
-                        .await;
-
-                    if init_status.is_err() || !init_status.unwrap().success() {
-                        let _ = tx_clone.send(ServerEvent::PackwizLog {
-                            id: id.clone(),
-                            line: "❌ Error al inicializar packwiz. ¿Está instalado go?".into(),
-                        });
-                        return;
-                    }
-                    let _ = tx_clone.send(ServerEvent::PackwizLog {
-                        id: id.clone(),
-                        line: "✅ Modpack inicializado correctamente con éxito.".into(),
-                    });
+                    return;
                 }
 
                 // 2. AÑADIR EL MOD
@@ -598,7 +611,6 @@ async fn handle_request(
                             });
                         }
 
-                        // Refrescamos la lista de mods en el frontend de forma automática
                         let _ = tx_clone.send(ServerEvent::Ack {
                             ok: true,
                             message: None,
@@ -649,6 +661,10 @@ async fn handle_request(
                                 line: stderr.trim().to_string(),
                             });
                         }
+                        let _ = tx_clone.send(ServerEvent::Ack {
+                            ok: true,
+                            message: None,
+                        });
                     }
                     Err(e) => {
                         let _ = tx_clone.send(ServerEvent::PackwizLog {
@@ -664,7 +680,7 @@ async fn handle_request(
             id,
             filename,
             data_base64,
-            folder, // "mods", "config", "resourcepacks", "shaderpacks" o "." para la raíz
+            folder,
         } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
@@ -760,6 +776,7 @@ async fn handle_request(
         ClientRequest::PublishPackwiz { id, pack_key } => {
             let tx_clone = tx.clone();
             let root_clone = state.root.clone();
+            let target_clone = state.publish_target.clone();
             tokio::spawn(async move {
                 let dest_dir = root_clone.join(&id);
                 let pack_dir = dest_dir.join("packwiz");
@@ -773,6 +790,18 @@ async fn handle_request(
                 });
 
                 // 👇 1. REGENERAR ÍNDICES Y HASHES DE FORMA SEGURA 👇
+
+                if let Err(e) =
+                    ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx_clone)
+                        .await
+                {
+                    let _ = tx_clone.send(ServerEvent::PackwizLog {
+                        id: id.clone(),
+                        line: format!("❌ {}", e),
+                    });
+                    return;
+                }
+
                 let _ = tx_clone.send(ServerEvent::PackwizLog {
                     id: id.clone(),
                     line: "> Regenerando base de datos global ('packwiz refresh')...".into(),
@@ -850,14 +879,8 @@ async fn handle_request(
                     line: "✅ modpacks.json actualizado localmente.".into(),
                 });
 
-                // 3. PUBLICAMOS POR SSH (Los archivos van con los hashes perfectos recalculados)
-                let target = crate::publisher::PublishTarget {
-                    ssh_host: "TheKaramelito@158.247.125.204".into(),
-                    remote_base: "~/lumineria".into(),
-                };
-
                 match crate::publisher::publish_packwiz(
-                    &target,
+                    &target_clone,
                     &pack_dir,
                     &database_dir,
                     &pack_key,
@@ -958,6 +981,59 @@ async fn handle_request(
                     id,
                     mods: files_list,
                 });
+            });
+        }
+
+        ClientRequest::UnpublishPackwiz { id, pack_key } => {
+            let tx_clone = tx.clone();
+            let root_clone = state.root.clone();
+            let target_clone = state.publish_target.clone();
+            tokio::spawn(async move {
+                let database_dir = root_clone.join("lumineria_database");
+
+                let _ = tx_clone.send(ServerEvent::PackwizLog {
+                    id: id.clone(),
+                    line: format!("> Quitando publicación de '{}'...", pack_key),
+                });
+
+                let existed = match crate::installer::packwiz_db::remove_entry(
+                    &database_dir,
+                    &pack_key,
+                )
+                .await
+                {
+                    Ok(existed) => existed,
+                    Err(e) => {
+                        let _ = tx_clone.send(ServerEvent::PackwizLog {
+                            id: id.clone(),
+                            line: format!("❌ {}", e),
+                        });
+                        return;
+                    }
+                };
+                if !existed {
+                    let _ = tx_clone.send(ServerEvent::PackwizLog {
+                        id: id.clone(),
+                        line: "ℹ️ Ese pack no estaba registrado en modpacks.json.".into(),
+                    });
+                }
+
+                match crate::publisher::unpublish_packwiz(&target_clone, &database_dir, &pack_key)
+                    .await
+                {
+                    Ok(()) => {
+                        let _ = tx_clone.send(ServerEvent::PackwizLog {
+                            id: id.clone(),
+                            line: "🗑️ Publicación eliminada de Nginx y del VPS.".into(),
+                        });
+                    }
+                    Err(e) => {
+                        let _ = tx_clone.send(ServerEvent::PackwizLog {
+                            id: id.clone(),
+                            line: format!("❌ Error al despublicar: {}", e),
+                        });
+                    }
+                }
             });
         }
     }

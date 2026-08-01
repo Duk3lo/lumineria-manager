@@ -88,6 +88,10 @@ pub enum ClientRequest {
         id: String,
         pack_key: String,
     },
+    UnpublishPackwiz {
+        id: String,
+        pack_key: String,
+    },
     ListPackwizMods {
         id: String,
     },
@@ -137,5 +141,5 @@ pub enum ServerEvent {
 pub struct PackwizMod {
     pub name: String,
     pub filename: String,
-    pub side: String, 
+    pub side: String,
 }

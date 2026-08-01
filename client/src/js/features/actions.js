@@ -75,6 +75,11 @@ export async function publishModpack(id, packKey) {
     await invoke('publish_packwiz', { id, packKey });
 }
 
+export async function unpublishModpack(id, packKey) {
+    updateStatus("Quitando publicación...", "#f9e2af");
+    await invoke('unpublish_packwiz', { id, packKey });
+}
+
 export async function listPackwizMods(id) {
     await invoke('list_packwiz_mods', { id });
 }
