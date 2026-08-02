@@ -222,53 +222,82 @@ pub async fn install_mod_installer(
         percentage: 50,
     });
 
-    let _ = tx.send(ServerEvent::InstallProgress {
-        id: server_id.to_string(),
-        step: "Extrayendo librerías en Podman... (Tomará un momento)".to_string(),
-        percentage: 50,
-    });
-
     let vol_data = format!("{}:/data:Z", dest_dir.display());
     let xmx = format!("-Xmx{max_ram}");
 
-    let output = Command::new("podman")
-        .args([
-            "run",
-            "--rm",
-            "--network",
-            "host",
-            "--userns=keep-id",
-            "-v",
-            &vol_data,
-            "-w",
-            "/data",
-            image,
-            "java",
-            &xmx,
-            "-jar",
-            installer_name,
-            "--installServer",
-        ])
-        .output()
-        .await?;
+    const MAX_RETRIES: u32 = 3;
+    let mut last_joined = String::new();
+    let mut last_code: Option<i32> = None;
+    let mut success = false;
 
-    let joined: String = String::from_utf8_lossy(&output.stdout)
-        .lines()
-        .chain(String::from_utf8_lossy(&output.stderr).lines())
-        .filter(|l| !l.trim().is_empty())
-        .collect::<Vec<_>>()
-        .join("\n");
-    if !joined.is_empty() {
-        let _ = tx.send(ServerEvent::PackwizLog {
-            id: server_id.to_string(),
-            line: joined,
-        });
+    for attempt in 1..=MAX_RETRIES {
+        if attempt > 1 {
+            let _ = tx.send(ServerEvent::PackwizLog {
+                id: server_id.to_string(),
+                line: format!(
+                    "🔁 Reintentando instalación del cargador (intento {attempt}/{MAX_RETRIES})..."
+                ),
+            });
+        }
+
+        let output = Command::new("podman")
+            .args([
+                "run",
+                "--rm",
+                "--network",
+                "host",
+                "--userns=keep-id",
+                "-v",
+                &vol_data,
+                "-w",
+                "/data",
+                image,
+                "java",
+                "-Djava.net.preferIPv4Stack=true", // 👈 evita el intento fallido a IPv6
+                &xmx,
+                "-jar",
+                installer_name,
+                "--installServer",
+            ])
+            .output()
+            .await?;
+
+        let joined: String = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .chain(String::from_utf8_lossy(&output.stderr).lines())
+            .filter(|l| !l.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        if output.status.success() {
+            if !joined.is_empty() {
+                let _ = tx.send(ServerEvent::PackwizLog {
+                    id: server_id.to_string(),
+                    line: joined,
+                });
+            }
+            success = true;
+            break;
+        }
+
+        last_joined = joined;
+        last_code = output.status.code();
+
+        if attempt < MAX_RETRIES {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        }
     }
 
-    if !output.status.success() {
+    if !success {
+        if !last_joined.is_empty() {
+            let _ = tx.send(ServerEvent::PackwizLog {
+                id: server_id.to_string(),
+                line: last_joined,
+            });
+        }
         bail!(
-            "Fallo en la instalación del cargador de mods (código {:?}). Mirá el log de arriba.",
-            output.status.code()
+            "Fallo en la instalación del cargador de mods tras {MAX_RETRIES} intentos (código {:?}). Mirá el log de arriba.",
+            last_code
         );
     }
 

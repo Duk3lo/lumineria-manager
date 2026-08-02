@@ -210,14 +210,16 @@ pub(crate) async fn upload_mod(
     let root_clone = state.root.clone();
     tokio::spawn(async move {
         use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let filename_lower = filename.to_lowercase();
         if filename.is_empty()
             || filename.contains('/')
             || filename.contains('\\')
             || filename.contains("..")
+            || matches!(filename_lower.as_str(), "pack.toml" | "index.toml")
         {
             let _ = tx_clone.send(ServerEvent::PackwizLog {
                 id: id.clone(),
-                line: format!("❌ Nombre de archivo inválido: '{}'", filename),
+                line: format!("❌ Nombre de archivo inválido o reservado: '{}'", filename),
             });
             return;
         }
@@ -284,6 +286,13 @@ pub(crate) async fn upload_mod(
                             let _ = tx_clone.send(ServerEvent::PackwizLog {
                                 id: id.clone(),
                                 line: log_out.to_string(),
+                            });
+                        }
+                        if o.status.success() && is_client_only_file(&folder, &filename) {
+                            force_side_client(&base, &relative_file_path).await;
+                            let _ = tx_clone.send(ServerEvent::PackwizLog {
+                                id: id.clone(),
+                                line: "ℹ️ Marcado como 'solo cliente': no se copiará a este servidor al sincronizar.".into(),
                             });
                         }
                     }
@@ -746,4 +755,62 @@ pub(crate) async fn sync_to_server(
             }
         }
     });
+}
+
+
+const CLIENT_ONLY_FILENAMES: &[&str] = &[
+    "options.txt",
+    "optionsof.txt",
+    "optionsshaders.txt",
+    "servers.dat",
+    "servers.dat_old",
+    "usercache.json",
+    "usernamecache.json",
+    "hotbar.nbt",
+    "realms_persistence.json",
+];
+
+
+fn is_client_only_category(folder: &str) -> bool {
+    let top = folder
+        .split('/')
+        .next()
+        .unwrap_or(folder)
+        .to_lowercase();
+    matches!(top.as_str(), "resourcepacks" | "shaderpacks")
+}
+
+fn is_client_only_file(folder: &str, filename: &str) -> bool {
+    if is_client_only_category(folder) {
+        return true;
+    }
+    let name_lower = filename.to_lowercase();
+    CLIENT_ONLY_FILENAMES.contains(&name_lower.as_str())
+}
+
+async fn force_side_client(pack_base: &std::path::Path, relative_file_path: &str) {
+    let toml_path = pack_base.join(std::path::Path::new(relative_file_path).with_extension("toml"));
+
+    let Ok(content) = tokio::fs::read_to_string(&toml_path).await else {
+        return;
+    };
+
+    let mut found = false;
+    let mut new_lines: Vec<String> = content
+        .lines()
+        .map(|line| {
+            if line.trim_start().starts_with("side") {
+                found = true;
+                "side = \"client\"".to_string()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+
+    if !found {
+        new_lines.push("side = \"client\"".to_string());
+    }
+
+    let _ = tokio::fs::write(&toml_path, new_lines.join("\n") + "\n").await;
 }
