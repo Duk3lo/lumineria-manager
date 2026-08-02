@@ -18,13 +18,14 @@ pub async fn download_file(
     step_name: &str,
     tx: &mpsc::UnboundedSender<ServerEvent>,
 ) -> Result<()> {
-    const MAX_RETRIES: u32 = 3;
+    const MAX_RETRIES: u32 = 5;
     let mut last_err: Option<anyhow::Error> = None;
 
     for attempt in 1..=MAX_RETRIES {
         let client = reqwest::Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .timeout(std::time::Duration::from_secs(30))
+            .connect_timeout(std::time::Duration::from_secs(25))
+            .timeout(std::time::Duration::from_secs(120))
+            .local_address("0.0.0.0".parse::<std::net::IpAddr>().ok())
             .build()
             .context("no pude construir el cliente HTTP")?;
 
