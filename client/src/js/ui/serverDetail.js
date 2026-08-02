@@ -575,11 +575,8 @@ export async function openServerDetail(server) {
     await openLogs(server.id);
 
     const isVelocity = server.server_type === 'velocity';
-
-    // Pestaña principal: Packwiz vs Plugins de Velocity
-    const isVelocity = server.server_type === 'velocity';
     const isModLoader = ['fabric', 'forge', 'neoforge', 'arclight'].includes(server.server_type);
-    const usesDirectPlugins = !isModLoader; // paper, folia, spigot, velocity
+    const usesDirectPlugins = !isModLoader;
 
     document.getElementById('tab-btn-packwiz')?.classList.toggle('hidden', isVelocity);
     document.getElementById('tab-btn-velocity-plugins')?.classList.toggle('hidden', !usesDirectPlugins);
@@ -589,7 +586,6 @@ export async function openServerDetail(server) {
     if (usesDirectPlugins) listVelocityPlugins(server.id);
     if (!isVelocity) listPackwizMods(server.id);
 
-    // Sub-pestañas de Archivos: para Velocity solo tiene sentido "Carpeta del Servidor"
     packwizExplorer.setServerId(server.id);
     serverExplorer.setServerId(server.id);
 
