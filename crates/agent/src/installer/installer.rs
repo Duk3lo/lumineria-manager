@@ -222,6 +222,12 @@ pub async fn install_mod_installer(
         percentage: 50,
     });
 
+    let _ = tx.send(ServerEvent::InstallProgress {
+        id: server_id.to_string(),
+        step: "Extrayendo librerías en Podman... (Tomará un momento)".to_string(),
+        percentage: 50,
+    });
+
     let vol_data = format!("{}:/data:Z", dest_dir.display());
     let xmx = format!("-Xmx{max_ram}");
 
@@ -239,34 +245,6 @@ pub async fn install_mod_installer(
             image,
             "java",
             &xmx,
-            "-jar",
-            installer_name,
-            "--installServer",
-        ])
-        .output()
-        .await?;
-
-    let _ = tx.send(ServerEvent::InstallProgress {
-        id: server_id.to_string(),
-        step: "Extrayendo librerías en Podman... (Tomará un momento)".to_string(),
-        percentage: 50,
-    });
-
-    let vol_data = format!("{}:/data:Z", dest_dir.display());
-
-    let output = Command::new("podman")
-        .args([
-            "run",
-            "--rm",
-            "--network",
-            "host",
-            "--userns=keep-id",
-            "-v",
-            &vol_data,
-            "-w",
-            "/data",
-            image,
-            "java",
             "-jar",
             installer_name,
             "--installServer",
