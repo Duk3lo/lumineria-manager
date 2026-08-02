@@ -19,7 +19,10 @@ pub(crate) async fn create_server(
 ) {
     let tx_clone = tx.clone();
     let root_clone = state.root.clone();
+    let busy_clone = state.busy.clone();
+    let tx_for_guard = tx.clone();
     tokio::spawn(async move {
+        super::super::state::with_busy_guard(busy_clone, "install".to_string(), &tx_for_guard, async move {
         let dest_dir = root_clone.join(&id);
         if dest_dir.exists() {
             let _ = tx_clone.send(ServerEvent::Error {
@@ -104,23 +107,21 @@ pub(crate) async fn create_server(
                 let loader = cfg.loader_version.clone().unwrap_or_default();
                 let url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar", loader);
                 installer::install_mod_installer(
-                    &client,
-                    &url,
-                    &format!("neoforge-{}-installer.jar", loader),
-                    &dest_dir,
-                    &id,
-                    &tx_clone,
-                    &cfg.min_ram,
-                    &cfg.max_ram,
-                    image,
-                )
-                .await
+    &url,
+    &format!("neoforge-{}-installer.jar", loader),
+    &dest_dir,
+    &id,
+    &tx_clone,
+    &cfg.min_ram,
+    &cfg.max_ram,
+    image,
+)
+.await
             }
             "forge" => {
                 let loader = cfg.loader_version.clone().unwrap_or_default();
                 let url = format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{0}/forge-{0}-installer.jar", loader);
                 installer::install_mod_installer(
-                    &client,
                     &url,
                     &format!("forge-{}-installer.jar", loader),
                     &dest_dir,
@@ -160,6 +161,7 @@ pub(crate) async fn create_server(
                 });
             }
         }
+        }).await;
     });
 }
 
@@ -703,7 +705,6 @@ async fn update_server(
                     new_build_id = Some(loader.clone());
                     let url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar", loader);
                     installer::install_mod_installer(
-                        &client,
                         &url,
                         &format!("neoforge-{}-installer.jar", loader),
                         &dest_dir,
@@ -729,7 +730,6 @@ async fn update_server(
                     new_build_id = Some(loader.clone());
                     let url = format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{0}/forge-{0}-installer.jar", loader);
                     installer::install_mod_installer(
-                        &client,
                         &url,
                         &format!("forge-{}-installer.jar", loader),
                         &dest_dir,

@@ -183,7 +183,6 @@ pub async fn install_fabric(
 }
 
 pub async fn install_mod_installer(
-    client: &reqwest::Client,
     url: &str,
     installer_name: &str,
     dest_dir: &Path,
