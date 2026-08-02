@@ -104,12 +104,11 @@ export async function updateLoaders() {
     const loaderSelect = document.getElementById('new-loader');
     const loaderLbl = document.getElementById('loader-lbl');
 
-    if (type === 'paper' || type === 'velocity') {
+    if (type === 'paper' || type === 'velocity' || type === 'folia') {
         loaderSelect.style.display = 'none';
         loaderLbl.style.display = 'none';
         return;
     }
-
     loaderSelect.style.display = 'block';
     loaderLbl.style.display = 'block';
     loaderSelect.innerHTML = "<option>Cargando loaders...</option>";
@@ -154,7 +153,7 @@ export async function submitCreateServer() {
         display_name: name,
         server_type: type,
         mc_version: version,
-        loader_version: (type !== 'paper' && type !== 'velocity') ? loader : null,
+        loader_version: (type !== 'paper' && type !== 'velocity' && type !== 'folia') ? loader : null,
         port: port,
         min_ram: minRam,
         max_ram: maxRam,
