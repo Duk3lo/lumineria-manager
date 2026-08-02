@@ -16,6 +16,21 @@ pub async fn list_servers(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub async fn set_publish_config_remote(
+    state: State<'_, AppState>,
+    ssh_host: Option<String>,
+    remote_base: String,
+    domain: String,
+) -> Result<(), String> {
+    send(&state, ClientRequest::SetPublishConfig { ssh_host, remote_base, domain }).await
+}
+
+#[tauri::command]
+pub async fn get_publish_config_remote(state: State<'_, AppState>) -> Result<(), String> {
+    send(&state, ClientRequest::GetPublishConfig).await
+}
+
+#[tauri::command]
 pub async fn start_server(state: State<'_, AppState>, id: String) -> Result<(), String> {
     send(&state, ClientRequest::StartServer { id }).await
 }

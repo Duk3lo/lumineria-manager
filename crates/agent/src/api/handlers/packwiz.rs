@@ -6,6 +6,45 @@ use protocol::{PackwizImage, ServerEvent};
 use tokio::fs;
 use tokio::sync::mpsc;
 
+fn display_loader_name(server_type: &str) -> String {
+    match server_type.to_lowercase().as_str() {
+        "neoforge" => "NeoForge".to_string(),
+        "forge" => "Forge".to_string(),
+        "fabric" => "Fabric".to_string(),
+        "paper" => "Paper".to_string(),
+        "velocity" => "Velocity".to_string(),
+        "folia" => "Folia".to_string(),
+        other => {
+            let mut c = other.chars();
+            match c.next() {
+                Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+                None => other.to_string(),
+            }
+        }
+    }
+}
+
+fn loader_installer_url(server_type: &str, build: &str) -> String {
+    match server_type.to_lowercase().as_str() {
+        "neoforge" => format!(
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar",
+            build
+        ),
+        "forge" => format!(
+            "https://maven.minecraftforge.net/net/minecraftforge/forge/{0}/forge-{0}-installer.jar",
+            build
+        ),
+        _ => String::new(),
+    }
+}
+
+fn version_id_for(server_type: &str, build: &Option<String>) -> String {
+    match build {
+        Some(b) if !b.is_empty() => format!("{}-{}", server_type.to_lowercase(), b),
+        _ => format!("{}-desconocida", server_type.to_lowercase()),
+    }
+}
+
 pub(crate) async fn ensure_packwiz_initialized(
     dest_dir: &std::path::Path,
     pack_dir: &std::path::Path,
@@ -335,9 +374,10 @@ pub(crate) async fn publish(
 ) {
     let tx_clone = tx.clone();
     let root_clone = state.root.clone();
-    let target_clone = state.publish_target.clone();
-    let domain_clone = state.domain.clone();
+    let target_arc = state.publish_target.clone();
+    let domain_arc = state.domain.clone();
     let busy_clone = state.busy.clone();
+    let domain_value = domain_arc.read().await.clone();
     let id_for_guard = id.clone();
     let tx_for_guard = tx.clone();
 
@@ -388,32 +428,41 @@ pub(crate) async fn publish(
             let env_path = dest_dir.join("server.env");
             let env_data = fs::read_to_string(&env_path).await.unwrap_or_default();
             let mut title = "Servidor Lumineria".to_string();
-            let mut mc_version = "1.21.1".to_string();
-            let mut server_type = "neoforge".to_string();
+let mut mc_version = "1.21.1".to_string();
+let mut server_type = "neoforge".to_string();
+let mut engine_build: Option<String> = None; 
 
-            for line in env_data.lines() {
-                if line.starts_with("SERVER_NAME=") {
-                    title = line
-                        .replace("SERVER_NAME=", "")
-                        .replace('"', "")
-                        .trim()
-                        .to_string();
-                }
-                if line.starts_with("MC_VERSION=") {
-                    mc_version = line
-                        .replace("MC_VERSION=", "")
-                        .replace('"', "")
-                        .trim()
-                        .to_string();
-                }
-                if line.starts_with("SERVER_TYPE=") {
-                    server_type = line
-                        .replace("SERVER_TYPE=", "")
-                        .replace('"', "")
-                        .trim()
-                        .to_string();
-                }
-            }
+for line in env_data.lines() {
+    if line.starts_with("SERVER_NAME=") {
+        title = line
+            .replace("SERVER_NAME=", "")
+            .replace('"', "")
+            .trim()
+            .to_string();
+    }
+    if line.starts_with("MC_VERSION=") {
+        mc_version = line
+            .replace("MC_VERSION=", "")
+            .replace('"', "")
+            .trim()
+            .to_string();
+    }
+    if line.starts_with("SERVER_TYPE=") {
+        server_type = line
+            .replace("SERVER_TYPE=", "")
+            .replace('"', "")
+            .trim()
+            .to_string();
+    }
+    if line.starts_with("ENGINE_BUILD=") {
+        engine_build = Some(
+            line.replace("ENGINE_BUILD=", "")
+                .replace('"', "")
+                .trim()
+                .to_string(),
+        );
+    }
+}
 
             let images_dir = root_clone.join("lumineria_database").join("images");
             let _ = tokio::fs::create_dir_all(&images_dir).await;
@@ -467,16 +516,17 @@ pub(crate) async fn publish(
                     .unwrap_or_else(|| "smp.png".to_string())
             };
 
-            let entry = crate::installer::packwiz_db::ModpackEntry {
-                title,
-                mc_version: mc_version.clone(),
-                version_id: format!("{}-latest", server_type),
-                java_version: 21,
-                loader_name: server_type.to_uppercase(),
-                loader_url: "https://maven.neoforged.net/releases/net/neoforged/neoforge/21.1.219/neoforge-21.1.219-installer.jar".to_string(),
-                packwiz_url: format!("{}/{}/pack.toml", domain_clone, pack_key),
-                image: format!("{}/images/{}", domain_clone, image_filename),
-            };
+            let build_str = engine_build.clone().unwrap_or_default();
+let entry = crate::installer::packwiz_db::ModpackEntry {
+    title,
+    mc_version: mc_version.clone(),
+    version_id: version_id_for(&server_type, &engine_build),
+    java_version: 21,
+    loader_name: display_loader_name(&server_type),
+    loader_url: loader_installer_url(&server_type, &build_str),
+    packwiz_url: format!("{}/{}/pack.toml", domain_value, pack_key),
+    image: format!("{}/images/{}", domain_value, image_filename),
+};
 
             if let Err(e) =
                 crate::installer::packwiz_db::upsert_entry(&database_dir, &pack_key, entry).await
@@ -492,19 +542,13 @@ pub(crate) async fn publish(
                 line: "✅ modpacks.json actualizado localmente.".into(),
             });
 
-            match crate::publisher::publish_packwiz(
-                &target_clone,
-                &pack_dir,
-                &database_dir,
-                &pack_key,
-            )
-            .await
-            {
-                Ok(()) => {
-                    let _ = tx_clone.send(ServerEvent::PackwizLog {
-                        id: id.clone(),
-                        line: "🚀 Sincronización completada. El modpack está en línea.".into(),
-                    });
+            let target_value = target_arc.read().await.clone();
+match crate::publisher::publish_packwiz(&target_value, &pack_dir, &database_dir, &pack_key).await {
+    Ok(()) => {
+        let _ = tx_clone.send(ServerEvent::PackwizLog {
+            id: id.clone(),
+            line: "🚀 Sincronización completada. El modpack está en línea.".into(),
+        });
 
                     match sync_mods_to_running_server(&dest_dir, &id, &tx_clone).await {
     Ok(()) => {
@@ -546,7 +590,7 @@ pub(crate) async fn unpublish(
 ) {
     let tx_clone = tx.clone();
     let root_clone = state.root.clone();
-    let target_clone = state.publish_target.clone();
+    let target_arc = state.publish_target.clone();
     tokio::spawn(async move {
         let pack_key = crate::docker::discovery::sanitize_container_name(&pack_key);
         let database_dir = root_clone.join("lumineria_database");
@@ -566,6 +610,7 @@ pub(crate) async fn unpublish(
                     return;
                 }
             };
+
         if !existed {
             let _ = tx_clone.send(ServerEvent::PackwizLog {
                 id: id.clone(),
@@ -573,7 +618,9 @@ pub(crate) async fn unpublish(
             });
         }
 
-        match crate::publisher::unpublish_packwiz(&target_clone, &database_dir, &pack_key).await {
+        let target_value = target_arc.read().await.clone();
+
+        match crate::publisher::unpublish_packwiz(&target_value, &database_dir, &pack_key).await {
             Ok(()) => {
                 let _ = tx_clone.send(ServerEvent::PackwizLog {
                     id: id.clone(),
@@ -589,6 +636,8 @@ pub(crate) async fn unpublish(
         }
     });
 }
+
+
 
 pub(crate) async fn list_mods(
     state: &AppState,

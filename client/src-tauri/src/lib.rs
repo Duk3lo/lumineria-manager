@@ -56,6 +56,8 @@ pub fn run() {
             commands::servers::set_motd,
             commands::servers::set_port,
             commands::servers::upload_server_icon,
+            commands::servers::set_publish_config_remote,
+            commands::servers::get_publish_config_remote,
             // --- Versions ---
             commands::versions::fetch_neoforge_versions,
             commands::versions::fetch_forge_versions,

@@ -173,6 +173,13 @@ pub enum ClientRequest {
     StopStack,
     RestartStack,
 
+    SetPublishConfig {
+        ssh_host: Option<String>,
+        remote_base: String,
+        domain: String,
+    },
+    GetPublishConfig,
+
     CreateServer {
         id: String,
         config: ServerConfigParams,
@@ -249,7 +256,11 @@ pub enum ServerEvent {
     Error {
         message: String,
     },
-
+    PublishConfig {
+        ssh_host: Option<String>,
+        remote_base: String,
+        domain: String,
+    },
     InstallProgress {
         id: String,
         step: String,

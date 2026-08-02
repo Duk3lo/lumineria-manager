@@ -3,13 +3,13 @@ use protocol::ServerEvent;
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, RwLock};
 
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) root: Arc<PathBuf>,
-    pub(crate) publish_target: Arc<PublishTarget>,
-    pub(crate) domain: Arc<String>,
+    pub(crate) publish_target: Arc<RwLock<PublishTarget>>,
+    pub(crate) domain: Arc<RwLock<String>>,
     pub(crate) token: Arc<String>,
     pub(crate) busy: Arc<Mutex<HashSet<String>>>,
 }

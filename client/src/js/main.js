@@ -7,7 +7,7 @@ import { appendLine } from './features/logs.js';
 import { renderServers, updateStatus } from './ui/serverList.js';
 import { invoke_ws_action, listPackwizMods } from './features/actions.js';
 import { initConfirmModal } from './ui/confirmModal.js';
-import { initPublishSettings } from './ui/publishSettings.js';
+import { initPublishSettings, applyRemotePublishConfig  } from './ui/publishSettings.js';
 
 document.addEventListener("DOMContentLoaded", async () => {
     initTabs();
@@ -64,6 +64,8 @@ document.addEventListener("DOMContentLoaded", async () => {
             handleFileContentEvent(data);
         } else if (data.type === "velocity_plugins_list") {
             handleVelocityPluginsListEvent(data);
+        } else if (data.type === "publish_config") {
+            applyRemotePublishConfig(data);
         }
     });
 

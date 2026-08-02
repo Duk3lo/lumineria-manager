@@ -42,6 +42,7 @@ export async function restoreLastConnection() {
         if (!last) return;
 
         if (last.mode === 'local' && last.folder) {
+            STATE.mode = 'local';
             switchTab('local');
             STATE.selectedFolder = last.folder;
             document.getElementById('folder-path').innerText = STATE.selectedFolder;
@@ -54,6 +55,7 @@ export async function restoreLastConnection() {
                 updateStatus("Error: " + e, "#f38ba8");
             }
         } else if (last.mode === 'remote' && last.url) {
+            STATE.mode = 'remote';
             switchTab('remote');
             document.getElementById('input-url').value = last.url;
             updateStatus("Reconectando...", "#f9e2af");
@@ -78,7 +80,10 @@ export function initConnection() {
         try {
             const url = await invoke('start_local_agent', { rootPath: STATE.selectedFolder });
             const ok = await connectAgent(url);
-            if (ok) await invoke('save_last_connection', { mode: 'local', folder: STATE.selectedFolder, url: null });
+            if (ok) {
+                STATE.mode = 'local';
+                await invoke('save_last_connection', { mode: 'local', folder: STATE.selectedFolder, url: null });
+            }
         } catch (e) {
             updateStatus("Error: " + e, "#f38ba8");
         }
@@ -99,7 +104,10 @@ export function initConnection() {
         }
 
         const ok = await connectAgent(url);
-        if (ok) await invoke('save_last_connection', { mode: 'remote', folder: null, url });
+        if (ok) {
+            STATE.mode = 'remote';
+            await invoke('save_last_connection', { mode: 'remote', folder: null, url });
+        }
     };
 
     document.getElementById('btn-refresh-list').onclick = () => invoke_ws_action({ type: "list_servers" });

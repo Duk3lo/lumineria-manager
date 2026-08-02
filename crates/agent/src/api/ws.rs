@@ -16,7 +16,7 @@ use protocol::{ClientRequest, ServerEvent};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::{mpsc, Mutex, RwLock};
 use tokio::task::JoinHandle;
 
 pub async fn serve(
@@ -28,8 +28,8 @@ pub async fn serve(
 ) -> Result<()> {
     let state = AppState {
         root: Arc::new(root),
-        publish_target: Arc::new(publish_target),
-        domain: Arc::new(domain),
+        publish_target: Arc::new(RwLock::new(publish_target)),
+        domain: Arc::new(RwLock::new(domain)),
         token: Arc::new(token),
         busy: Arc::new(Mutex::new(HashSet::new())),
     };
@@ -78,8 +78,12 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     let writer_task = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
-            let Ok(json) = serde_json::to_string(&event) else { continue };
-            if sink.send(Message::Text(json.into())).await.is_err() { break; }
+            let Ok(json) = serde_json::to_string(&event) else {
+                continue;
+            };
+            if sink.send(Message::Text(json.into())).await.is_err() {
+                break;
+            }
         }
     });
 
@@ -90,7 +94,10 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         loop {
             interval.tick().await;
             if let Ok(list) = crate::docker::discovery::discover(&poll_root) {
-                if poll_tx.send(ServerEvent::Servers { servers: list }).is_err() {
+                if poll_tx
+                    .send(ServerEvent::Servers { servers: list })
+                    .is_err()
+                {
                     break;
                 }
             }
@@ -104,7 +111,9 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         let request: ClientRequest = match serde_json::from_str(&text) {
             Ok(r) => r,
             Err(e) => {
-                let _ = tx.send(ServerEvent::Error { message: format!("mensaje inválido: {e}") });
+                let _ = tx.send(ServerEvent::Error {
+                    message: format!("mensaje inválido: {e}"),
+                });
                 continue;
             }
         };

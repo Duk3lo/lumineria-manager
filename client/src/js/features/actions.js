@@ -153,6 +153,15 @@ export async function uploadServerIcon(id, dataBase64) {
     await invoke('upload_server_icon', { id, dataBase64 });
 }
 
+export async function setPublishConfigRemote(sshHost, remoteBase, domain) {
+    updateStatus("Actualizando configuración de publicación...", "#f9e2af");
+    await invoke('set_publish_config_remote', { sshHost, remoteBase, domain });
+}
+
+export async function getPublishConfigRemote() {
+    await invoke('get_publish_config_remote');
+}
+
 window.sendAction = sendAction;
 window.confirmDelete = confirmDelete;
 window.openServerFolder = openServerFolder;
