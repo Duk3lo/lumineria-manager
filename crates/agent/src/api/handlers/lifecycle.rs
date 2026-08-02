@@ -490,8 +490,7 @@ async fn update_server(
     let max_ram = read_env_value(&env_data, "MAX_RAM").unwrap_or_else(|| "4G".into());
 
     let pack_dir = dest_dir.join("packwiz");
-    let packwiz_bin = crate::system::deps::find_in_path("packwiz")
-        .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+    let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
 
     // 👇 UN SOLO client, usado para todo (chequeo de Velocity incluido)
     let client = reqwest::Client::new();

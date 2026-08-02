@@ -110,8 +110,7 @@ pub(crate) async fn delete_file(
         }
 
         if scope == protocol::FileScope::Packwiz {
-            let packwiz_bin = crate::system::deps::find_in_path("packwiz")
-                .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+            let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
             let _ = tokio::process::Command::new(&packwiz_bin)
                 .arg("refresh")
                 .current_dir(&base)

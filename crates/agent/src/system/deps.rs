@@ -127,7 +127,7 @@ fn install_packages(pm: PackageManager, sudo_cmd: &str, packages: &[&str]) -> Re
 }
 
 /// Helper para determinar dónde instala Go los binarios en este sistema
-fn get_go_bin_dir() -> Result<PathBuf> {
+pub fn get_go_bin_dir() -> Result<PathBuf> {
     if let Ok(gobin) = std::env::var("GOBIN") {
         return Ok(PathBuf::from(gobin));
     }
@@ -136,6 +136,19 @@ fn get_go_bin_dir() -> Result<PathBuf> {
     }
     let home = std::env::var("HOME").context("No se pudo obtener la variable HOME")?;
     Ok(PathBuf::from(home).join("go").join("bin"))
+}
+
+pub fn resolve_packwiz_bin() -> PathBuf {
+    if let Some(path) = find_in_path("packwiz") {
+        return path;
+    }
+    if let Ok(go_bin_dir) = get_go_bin_dir() {
+        let candidate = go_bin_dir.join("packwiz");
+        if candidate.is_file() {
+            return candidate;
+        }
+    }
+    PathBuf::from("packwiz")
 }
 
 /// Usa `go install` para descargar, compilar e instalar Packwiz

@@ -80,8 +80,8 @@ pub(crate) async fn add_mod(
     tokio::spawn(async move {
         let dest_dir = root_clone.join(&id);
         let pack_dir = dest_dir.join("packwiz");
-        let packwiz_bin = crate::system::deps::find_in_path("packwiz")
-            .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+
+        let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
 
         if let Err(e) =
             ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx_clone).await
@@ -107,6 +107,7 @@ pub(crate) async fn add_mod(
             .arg(source)
             .arg("add")
             .arg(&query)
+            .arg("-y")
             .current_dir(&pack_dir)
             .output()
             .await;
@@ -152,8 +153,7 @@ pub(crate) async fn remove_mod(
     let root_clone = state.root.clone();
     tokio::spawn(async move {
         let dest_dir = root_clone.join(&id).join("packwiz");
-        let packwiz_bin = crate::system::deps::find_in_path("packwiz")
-            .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+        let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
 
         let _ = tx_clone.send(ServerEvent::PackwizLog {
             id: id.clone(),
@@ -267,8 +267,7 @@ pub(crate) async fn upload_mod(
                 }
 
                 if scope == protocol::FileScope::Packwiz {
-                    let packwiz_bin = crate::system::deps::find_in_path("packwiz")
-                        .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+                    let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
                     let relative_file_path = if is_root {
                         filename.clone()
                     } else {
@@ -338,8 +337,7 @@ pub(crate) async fn publish(
             let dest_dir = root_clone.join(&id);
             let pack_dir = dest_dir.join("packwiz");
             let database_dir = root_clone.join("lumineria_database");
-            let packwiz_bin = crate::system::deps::find_in_path("packwiz")
-                .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+            let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
 
             let _ = tx_clone.send(ServerEvent::PackwizLog {
                 id: id.clone(),
@@ -716,16 +714,22 @@ pub(crate) async fn sync_to_server(
     tokio::spawn(async move {
         let dest_dir = root_clone.join(&id);
         let pack_dir = dest_dir.join("packwiz");
-        let packwiz_bin = crate::system::deps::find_in_path("packwiz")
-            .unwrap_or_else(|| std::path::PathBuf::from("packwiz"));
+        let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
 
         let _ = tx_clone.send(ServerEvent::PackwizLog {
             id: id.clone(),
-            line: "> Sincronizando mods/plugins solo con este servidor (sin publicar a clientes)...".into(),
+            line:
+                "> Sincronizando mods/plugins solo con este servidor (sin publicar a clientes)..."
+                    .into(),
         });
 
-        if let Err(e) = ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx_clone).await {
-            let _ = tx_clone.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("❌ {}", e) });
+        if let Err(e) =
+            ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx_clone).await
+        {
+            let _ = tx_clone.send(ServerEvent::PackwizLog {
+                id: id.clone(),
+                line: format!("❌ {}", e),
+            });
             return;
         }
 
@@ -737,7 +741,10 @@ pub(crate) async fn sync_to_server(
         {
             let log = String::from_utf8_lossy(&o.stdout);
             if !log.is_empty() {
-                let _ = tx_clone.send(ServerEvent::PackwizLog { id: id.clone(), line: log.to_string() });
+                let _ = tx_clone.send(ServerEvent::PackwizLog {
+                    id: id.clone(),
+                    line: log.to_string(),
+                });
             }
         }
 
@@ -757,7 +764,6 @@ pub(crate) async fn sync_to_server(
     });
 }
 
-
 const CLIENT_ONLY_FILENAMES: &[&str] = &[
     "options.txt",
     "optionsof.txt",
@@ -770,13 +776,8 @@ const CLIENT_ONLY_FILENAMES: &[&str] = &[
     "realms_persistence.json",
 ];
 
-
 fn is_client_only_category(folder: &str) -> bool {
-    let top = folder
-        .split('/')
-        .next()
-        .unwrap_or(folder)
-        .to_lowercase();
+    let top = folder.split('/').next().unwrap_or(folder).to_lowercase();
     matches!(top.as_str(), "resourcepacks" | "shaderpacks")
 }
 
