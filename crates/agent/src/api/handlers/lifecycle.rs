@@ -27,7 +27,7 @@ pub(crate) async fn create_server(
         if dest_dir.exists() {
             let _ = tx_clone.send(ServerEvent::Error {
                 message: format!(
-                    "❌ Ya existe un servidor con el id '{}'. Elege otro nombre.",
+                    "❌ Ya existe un servidor con el id '{}'. Elige otro nombre.",
                     id
                 ),
             });
@@ -35,13 +35,12 @@ pub(crate) async fn create_server(
         }
 
         let port_taken = crate::docker::discovery::is_port_registered(&root_clone, cfg.port)
-            .unwrap_or(false)
-            || !crate::installer::config::is_port_free(cfg.port);
+            .unwrap_or(false);
 
         if port_taken {
             let _ = tx_clone.send(ServerEvent::Error {
                 message: format!(
-                    "❌ El puerto {} ya está en uso por otro servidor (esté corriendo o no). Elege otro.",
+                    "❌ El puerto {} ya está en uso por otro servidor (esté corriendo o no). Elige otro.",
                     cfg.port
                 ),
             });
@@ -60,19 +59,17 @@ pub(crate) async fn create_server(
             step: "Iniciando instalación".into(),
             percentage: 5,
         });
-        let rcon_creds = config::rcon_credentials_for(&cfg);
-        if config::write_server_env(&dest_dir, &cfg, &rcon_creds)
-            .await
-            .is_err()
-            || config::write_server_properties(&dest_dir, &cfg, &rcon_creds)
-                .await
-                .is_err()
+
+        // 👇 AQUI ESTABA EL ERROR: Ya NO pasamos rcon_creds
+        if config::write_server_env(&dest_dir, &cfg).await.is_err()
+            || config::write_server_properties(&dest_dir, &cfg).await.is_err()
         {
             let _ = tx_clone.send(ServerEvent::Error {
                 message: "Error al escribir configuraciones locales.".into(),
             });
             return;
         }
+        
         let _ = tokio::fs::write(dest_dir.join("eula.txt"), "eula=true\n").await;
         let image = podman::java_image_for(&cfg.server_type, &cfg.mc_version);
         let result = match cfg.server_type.as_str() {
@@ -107,16 +104,16 @@ pub(crate) async fn create_server(
                 let loader = cfg.loader_version.clone().unwrap_or_default();
                 let url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar", loader);
                 installer::install_mod_installer(
-    &url,
-    &format!("neoforge-{}-installer.jar", loader),
-    &dest_dir,
-    &id,
-    &tx_clone,
-    &cfg.min_ram,
-    &cfg.max_ram,
-    image,
-)
-.await
+                    &url,
+                    &format!("neoforge-{}-installer.jar", loader),
+                    &dest_dir,
+                    &id,
+                    &tx_clone,
+                    &cfg.min_ram,
+                    &cfg.max_ram,
+                    image,
+                )
+                .await
             }
             "forge" => {
                 let loader = cfg.loader_version.clone().unwrap_or_default();
@@ -497,11 +494,8 @@ async fn update_server(
     let pack_dir = dest_dir.join("packwiz");
     let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
 
-    // 👇 UN SOLO client, usado para todo (chequeo de Velocity incluido)
     let client = reqwest::Client::new();
 
-    // Excepción de Velocity: siempre va a la última versión disponible,
-    // ignorando MC_VERSION guardado.
     if server_type == "velocity" && update_engine {
         match installer::latest_velocity_version(&client).await {
             Ok(latest) => {

@@ -2,7 +2,6 @@ mod api;
 mod docker;
 mod installer;
 mod publisher;
-mod rcon;
 mod system;
 
 use clap::{Parser, Subcommand};

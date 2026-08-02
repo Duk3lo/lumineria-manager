@@ -1,9 +1,7 @@
 use super::super::state::AppState;
-use super::super::utils::read_env_value;
 use crate::docker::podman;
 use protocol::ServerEvent;
 use std::collections::HashMap;
-use tokio::fs;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
@@ -49,40 +47,14 @@ pub(crate) fn unsubscribe_logs(log_tasks: &mut HashMap<String, JoinHandle<()>>, 
 }
 
 pub(crate) async fn send_console_command(
-    state: &AppState,
+    _state: &AppState,
     tx: &mpsc::UnboundedSender<ServerEvent>,
     id: String,
     command: String,
 ) {
     let tx_clone = tx.clone();
-    let root_clone = state.root.clone();
+    
     tokio::spawn(async move {
-        let env_path = root_clone.join(&id).join("server.env");
-        let env_data = match fs::read_to_string(&env_path).await {
-            Ok(d) => d,
-            Err(_) => {
-                let _ = tx_clone.send(ServerEvent::Error {
-                    message: "No encontré la configuración del servidor.".into(),
-                });
-                return;
-            }
-        };
-
-        let rcon_port: u16 = read_env_value(&env_data, "RCON_PORT")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(25575);
-        let rcon_password = match read_env_value(&env_data, "RCON_PASSWORD") {
-            Some(p) if !p.is_empty() => p,
-            _ => {
-                let _ = tx_clone.send(ServerEvent::Error {
-                    message:
-                        "Este servidor no tiene RCON configurado (creálo de nuevo para tenerlo)."
-                            .into(),
-                });
-                return;
-            }
-        };
-
         if !podman::is_running(&id).await {
             let _ = tx_clone.send(ServerEvent::Error {
                 message: "El servidor está detenido, iniciálo antes de mandar comandos.".into(),
@@ -90,25 +62,17 @@ pub(crate) async fn send_console_command(
             return;
         }
 
-        match crate::rcon::RconClient::connect("127.0.0.1", rcon_port, &rcon_password).await {
-            Ok(mut client) => match client.command(&command).await {
-                Ok(response) => {
-                    let clean = if response.trim().is_empty() {
-                        "(sin salida)".to_string()
-                    } else {
-                        response.trim().to_string()
-                    };
-                    let _ = tx_clone.send(ServerEvent::ConsoleResponse { id, response: clean });
-                }
-                Err(e) => {
-                    let _ = tx_clone.send(ServerEvent::Error {
-                        message: format!("Error ejecutando comando: {e}"),
-                    });
-                }
-            },
+        // Enviamos el comando directamente por Podman, olvidándonos de RCON
+        match podman::send_stdin_command(&id, &command).await {
+            Ok(()) => {
+                let _ = tx_clone.send(ServerEvent::ConsoleResponse {
+                    id,
+                    response: "(comando enviado — mirá la respuesta en la consola)".into(),
+                });
+            }
             Err(e) => {
                 let _ = tx_clone.send(ServerEvent::Error {
-                    message: format!("No pude conectar al RCON: {e}"),
+                    message: format!("No pude enviar el comando: {e}"),
                 });
             }
         }

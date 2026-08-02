@@ -76,6 +76,10 @@ pub enum ClientRequest {
     StartServer {
         id: String,
     },
+    SetMotd {
+        id: String,
+        motd: String,
+    },
     SyncVelocityPlugins {
         id: String,
     },
@@ -110,6 +114,10 @@ pub enum ClientRequest {
         update_engine: bool,
         #[serde(default)]
         force: bool,
+    },
+    UploadServerIcon {
+        id: String,
+        data_base64: String,
     },
     CreateDirectory {
         id: String,

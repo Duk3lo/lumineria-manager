@@ -158,6 +158,14 @@ export function initServerDetail() {
         }, '⏳ Actualizando...');
     }
 
+    const btnMotd = document.getElementById('btn-set-motd');
+    if (btnMotd) {
+        withGuard(btnMotd, async () => {
+            const motd = prompt("Nuevo MOTD (mensaje del día):");
+            if (motd) await setMotd(currentServerId, motd);
+        });
+    }
+
     const btnAddModrinth = document.getElementById('btn-vp-add-modrinth');
     if (btnAddModrinth) {
         withGuard(btnAddModrinth, async () => {

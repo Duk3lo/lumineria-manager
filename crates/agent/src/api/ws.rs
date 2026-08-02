@@ -78,11 +78,21 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
     let writer_task = tokio::spawn(async move {
         while let Some(event) = rx.recv().await {
-            let Ok(json) = serde_json::to_string(&event) else {
-                continue;
-            };
-            if sink.send(Message::Text(json.into())).await.is_err() {
-                break;
+            let Ok(json) = serde_json::to_string(&event) else { continue };
+            if sink.send(Message::Text(json.into())).await.is_err() { break; }
+        }
+    });
+
+    let poll_root = state.root.clone();
+    let poll_tx = tx.clone();
+    let poll_task = tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(4));
+        loop {
+            interval.tick().await;
+            if let Ok(list) = crate::docker::discovery::discover(&poll_root) {
+                if poll_tx.send(ServerEvent::Servers { servers: list }).is_err() {
+                    break;
+                }
             }
         }
     });
@@ -94,9 +104,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         let request: ClientRequest = match serde_json::from_str(&text) {
             Ok(r) => r,
             Err(e) => {
-                let _ = tx.send(ServerEvent::Error {
-                    message: format!("mensaje inválido: {e}"),
-                });
+                let _ = tx.send(ServerEvent::Error { message: format!("mensaje inválido: {e}") });
                 continue;
             }
         };
@@ -106,5 +114,6 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     for (_, handle) in log_tasks {
         handle.abort();
     }
+    poll_task.abort();
     writer_task.abort();
 }

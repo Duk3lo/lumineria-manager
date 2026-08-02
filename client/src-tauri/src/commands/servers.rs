@@ -107,6 +107,11 @@ pub async fn list_velocity_plugins(state: tauri::State<'_, AppState>, id: String
 }
 
 #[tauri::command]
+pub async fn set_motd(state: State<'_, AppState>, id: String, motd: String) -> Result<(), String> {
+    send(&state, ClientRequest::SetMotd { id, motd }).await
+}
+
+#[tauri::command]
 pub async fn add_velocity_plugin(
     state: tauri::State<'_, AppState>,
     id: String,

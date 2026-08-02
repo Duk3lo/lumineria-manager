@@ -4,6 +4,7 @@ mod lifecycle;
 mod packwiz;
 mod servers;
 mod plugins;
+mod icon;
 
 use super::state::AppState;
 use protocol::{ClientRequest, ServerEvent};
@@ -116,6 +117,8 @@ pub(crate) async fn handle_request(
             files::create_directory(state, tx, id, path, scope).await
         }
         ClientRequest::SyncVelocityPlugins { id } => plugins::sync_plugins_now(state, tx, id).await,
+        ClientRequest::SetMotd { id, motd } => servers::set_motd(state, tx, id, motd).await,
+        ClientRequest::UploadServerIcon { id, data_base64 } => icon::upload_server_icon(state, tx, id, data_base64).await,
         ClientRequest::SyncPackToServer { id } => packwiz::sync_to_server(state, tx, id).await,
     }
 }

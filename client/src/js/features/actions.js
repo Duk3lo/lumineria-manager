@@ -140,6 +140,10 @@ export async function syncVelocityPluginsNow(id) {
     await invoke('sync_velocity_plugins', { id });
 }
 
+export async function setMotd(id, motd) {
+    await invoke('set_motd', { id, motd });
+}
+
 window.sendAction = sendAction;
 window.confirmDelete = confirmDelete;
 window.openServerFolder = openServerFolder;

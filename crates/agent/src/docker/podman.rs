@@ -1,7 +1,7 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::path::Path;
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
@@ -101,7 +101,6 @@ pub fn java_image_for(server_type: &str, mc_version: &str) -> &'static str {
 }
 
 pub async fn create_container(id: &str, dest_dir: &Path, image: &str) -> Result<()> {
-    // Idempotente: si ya existía, lo borramos y lo recreamos
     let _ = Command::new("podman").args(["rm", "-f", id]).status().await;
 
     let volume = format!("{}:/data:Z", dest_dir.display());
@@ -109,18 +108,14 @@ pub async fn create_container(id: &str, dest_dir: &Path, image: &str) -> Result<
     let status = Command::new("podman")
         .args([
             "create",
-            "--name",
-            id,
-            "--network",
-            "host", // 👈 Red 'host' para exponer todos los puertos automáticamente
+            "--name", id,
+            "--network", "host",
             "--userns=keep-id",
-            "-v",
-            &volume,
-            "--restart",
-            "unless-stopped",
+            "-i",
+            "-v", &volume,
+            "--restart", "unless-stopped",
             image,
-            "sh",
-            "/data/start.sh",
+            "sh", "/data/start.sh",
         ])
         .status()
         .await?;
@@ -128,9 +123,34 @@ pub async fn create_container(id: &str, dest_dir: &Path, image: &str) -> Result<
     if !status.success() {
         bail!("podman create falló para {id} (código {:?})", status.code());
     }
-
     Ok(())
 }
+
+pub async fn send_stdin_command(container_id: &str, command: &str) -> Result<()> {
+    let mut child = Command::new("podman")
+        .args(["exec", "-i", container_id, "sh", "-c", "cat > /proc/1/fd/0"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("no pude ejecutar podman exec")?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(format!("{command}\n").as_bytes())
+            .await
+            .context("no pude escribir el comando")?;
+        stdin.shutdown().await.ok();
+    }
+
+    let output = child.wait_with_output().await?;
+    if !output.status.success() {
+        let err = String::from_utf8_lossy(&output.stderr);
+        bail!("podman exec falló: {}", err.trim());
+    }
+    Ok(())
+}
+
 
 pub async fn delete_container(container_id: &str) -> Result<()> {
     let _ = Command::new("podman")
