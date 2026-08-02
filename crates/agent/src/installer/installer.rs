@@ -12,7 +12,6 @@ const PAPER_API_BASE: &str = "https://fill.papermc.io/v3/projects";
 const UA: &str = "LumineriaManager/2.0 (contacto: admin@lumineria.local)";
 
 pub async fn download_file(
-    client: &reqwest::Client,
     url: &str,
     dest: &Path,
     server_id: &str,
@@ -23,7 +22,13 @@ pub async fn download_file(
     let mut last_err: Option<anyhow::Error> = None;
 
     for attempt in 1..=MAX_RETRIES {
-        match try_download_once(client, url, dest, server_id, step_name, tx).await {
+        let client = reqwest::Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(10))
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+            .context("no pude construir el cliente HTTP")?;
+
+        match try_download_once(&client, url, dest, server_id, step_name, tx).await {
             Ok(()) => return Ok(()),
             Err(e) => {
                 let _ = tx.send(ServerEvent::PackwizLog {
@@ -123,15 +128,7 @@ pub async fn install_fabric(
 
     let installer_path = dest_dir.join("fabric-installer.jar");
 
-    download_file(
-        client,
-        &installer_url,
-        &installer_path,
-        server_id,
-        "Descargando Fabric Installer",
-        tx,
-    )
-    .await?;
+    download_file(&installer_url, &installer_path, server_id, "Descargando Fabric Installer", tx).await?;
 
     let _ = tx.send(ServerEvent::InstallProgress {
         id: server_id.to_string(),
@@ -197,15 +194,7 @@ pub async fn install_mod_installer(
     image: &str,
 ) -> Result<()> {
     let installer_path = dest_dir.join(installer_name);
-    download_file(
-        client,
-        url,
-        &installer_path,
-        server_id,
-        "Descargando Instalador",
-        tx,
-    )
-    .await?;
+    download_file(url, &installer_path, server_id, "Descargando Instalador", tx).await?;
 
     let _ = tx.send(ServerEvent::InstallProgress {
         id: server_id.to_string(),
@@ -472,15 +461,7 @@ pub async fn install_papermc(
         .ok_or_else(|| anyhow::anyhow!("No se encontró la url de descarga"))?;
 
     let output_path = dest_dir.join(&jar_name);
-    download_file(
-        client,
-        download_url,
-        &output_path,
-        server_id,
-        "Descargando Motor",
-        tx,
-    )
-    .await?;
+    download_file(download_url, &output_path, server_id, "Descargando Motor", tx).await?;
     write_start_script(dest_dir, project, min_ram, max_ram, &jar_name).await?;
 
     Ok((jar_name, build_number))
