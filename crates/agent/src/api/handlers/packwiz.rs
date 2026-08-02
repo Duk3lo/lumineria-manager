@@ -41,13 +41,15 @@ pub(crate) async fn ensure_packwiz_initialized(
                 .to_string();
         }
     }
-    let loader = match server_type.as_str() {
-        "paper" => "paper",
-        "velocity" => "velocity",
-        "folia" => "paper",
-        other => other,
+
+    let (loader, packwiz_mc_version): (&str, String) = match server_type.as_str() {
+        "paper" => ("paper", mc_version.clone()),
+        "velocity" => ("none", "1.21.1".to_string()),
+        "folia" => ("paper", mc_version.clone()),
+        other => (other, mc_version.clone()),
     };
-    let status = tokio::process::Command::new(packwiz_bin)
+
+    let output = tokio::process::Command::new(packwiz_bin)
         .args([
             "init",
             "--name",
@@ -55,16 +57,24 @@ pub(crate) async fn ensure_packwiz_initialized(
             "--author",
             "Lumineria",
             "--mc-version",
-            &mc_version,
+            &packwiz_mc_version,
             "--modloader",
             loader,
             "-y",
         ])
         .current_dir(pack_dir)
-        .status()
+        .output()
         .await?;
-    if !status.success() {
-        anyhow::bail!("No pude inicializar packwiz para '{}'", id);
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let detail = if !stderr.trim().is_empty() {
+            stderr.trim()
+        } else {
+            stdout.trim()
+        };
+        anyhow::bail!("No pude inicializar packwiz para '{}': {}", id, detail);
     }
     Ok(())
 }
