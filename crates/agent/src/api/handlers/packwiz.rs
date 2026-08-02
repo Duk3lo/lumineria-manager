@@ -308,7 +308,6 @@ pub(crate) async fn upload_mod(
 
                 if scope == protocol::FileScope::Packwiz {
                     let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
-                    // Usamos refresh para que indexe el .jar sin hacer preguntas interactivas
                     let out = tokio::process::Command::new(&packwiz_bin)
                         .arg("refresh")
                         .current_dir(&base)
@@ -321,6 +320,57 @@ pub(crate) async fn upload_mod(
                                 id: id.clone(),
                                 line: log_out.to_string(),
                             });
+                        }
+
+                        // === NUEVA AYUDITA DE AUTODETECCIÓN PARA SUBIDAS MANUALES ===
+                        let folder_lower = folder.to_lowercase();
+                        if folder_lower.contains("resourcepacks") || folder_lower.contains("shaderpacks") {
+                            let relative_file_path = if is_root {
+                                filename.clone()
+                            } else {
+                                format!("{}/{}", folder, filename)
+                            };
+                            
+                            let index_path = base.join("index.toml");
+                            if let Ok(index_content) = tokio::fs::read_to_string(&index_path).await {
+                                let mut new_content = String::new();
+                                let mut in_target_file = false;
+                                let mut added_meta = false;
+
+                                for line in index_content.lines() {
+                                    if line.trim().starts_with("file =") {
+                                        let f = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                                        if f == relative_file_path {
+                                            in_target_file = true;
+                                            added_meta = false;
+                                        } else {
+                                            in_target_file = false;
+                                        }
+                                    }
+
+                                    if in_target_file && line.trim().starts_with("[[files]]") {
+                                        if !added_meta {
+                                            new_content.push_str("meta.side = \"client\"\n");
+                                        }
+                                        in_target_file = false;
+                                    }
+
+                                    new_content.push_str(line);
+                                    new_content.push('\n');
+                                }
+                                if in_target_file && !added_meta {
+                                    new_content.push_str("meta.side = \"client\"\n");
+                                }
+
+                                let _ = tokio::fs::write(&index_path, new_content).await;
+
+                                // Refrescar de nuevo para validar el index.toml limpio
+                                let _ = tokio::process::Command::new(&packwiz_bin)
+                                    .arg("refresh")
+                                    .current_dir(&base)
+                                    .output()
+                                    .await;
+                            }
                         }
                     }
                 }
