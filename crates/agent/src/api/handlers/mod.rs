@@ -3,6 +3,7 @@ mod files;
 mod lifecycle;
 mod packwiz;
 mod servers;
+mod velocity;
 
 use super::state::AppState;
 use protocol::{ClientRequest, ServerEvent};
@@ -35,7 +36,9 @@ pub(crate) async fn handle_request(
         ClientRequest::CreateServer { id, config } => {
             lifecycle::create_server(state, tx, id, config).await
         }
-        ClientRequest::AutoUpdateServer { id } => lifecycle::auto_update_server(state, tx, id).await,
+        ClientRequest::AutoUpdateServer { id } => {
+            lifecycle::auto_update_server(state, tx, id).await
+        }
         ClientRequest::RecreateContainer { id } => {
             lifecycle::recreate_container(state, tx, id).await
         }
@@ -97,6 +100,18 @@ pub(crate) async fn handle_request(
         ClientRequest::DeleteFile { id, path, scope } => {
             files::delete_file(state, tx, id, path, scope).await
         }
+
+        ClientRequest::ListVelocityPlugins { id } => velocity::list_plugins(state, tx, id).await,
+        ClientRequest::AddVelocityPlugin { id, source, value } => {
+            velocity::add_plugin(state, tx, id, source, value).await
+        }
+        ClientRequest::RemoveVelocityPlugin { id, source, value } => {
+            velocity::remove_plugin(state, tx, id, source, value).await
+        }
+        ClientRequest::SetVelocityMcVersionHint { id, mc_version } => {
+            velocity::set_mc_version_hint(state, tx, id, mc_version).await
+        }
+
         ClientRequest::CreateDirectory { id, path, scope } => {
             files::create_directory(state, tx, id, path, scope).await
         }

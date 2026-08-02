@@ -2,7 +2,8 @@ import {
     sendAction, confirmDelete, openServerFolder,
     addMod, removeMod, uploadMod, publishModpack, syncPackToServer,
     listPackwizMods, unpublishModpack, sendConsoleCommand, listPackwizFiles,
-    readFile, writeFile, deleteFile, createDirectory, updateAllServer
+    readFile, writeFile, deleteFile, createDirectory, updateAllServer,
+    listVelocityPlugins, addVelocityPlugin, removeVelocityPlugin, setVelocityMcVersionHint
 } from '../features/actions.js';
 import { openLogs, closeLogs } from '../features/logs.js';
 import { appendLine } from '../features/logs.js';
@@ -42,6 +43,41 @@ export function handleFilesListEvent(data) {
     if (data.scope === "packwiz") packwizExplorer.render(data.files);
     else if (data.scope === "server_root") serverExplorer.render(data.files);
 }
+
+export function handleVelocityPluginsListEvent(data) {
+    if (data.id !== currentServerId) return;
+    renderVelocityPlugins(data.plugins);
+}
+
+function renderVelocityPlugins(plugins) {
+    const container = document.getElementById('vp-plugins-list');
+    if (!container) return;
+    if (!plugins || plugins.length === 0) {
+        container.innerHTML = `<p style="color:#6c7086; text-align:center; margin:20px 0;">No hay plugins configurados todavía.</p>`;
+        return;
+    }
+    const sourceLabel = { modrinth: '🟢 Modrinth', github: '🐙 GitHub', direct: '🔗 Directo' };
+    const sourceColor = { modrinth: '#a6e3a1', github: '#89b4fa', direct: '#fab387' };
+    container.innerHTML = plugins.map(p => `
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:8px; border-bottom:1px solid #313244;">
+            <div>
+                <span style="color:${sourceColor[p.source] || '#cdd6f4'}; font-size:0.75em; font-weight:bold;">${sourceLabel[p.source] || p.source}</span>
+                <div style="font-family:monospace; color:#cdd6f4;">${escapeHtml(p.value)}</div>
+            </div>
+            <button class="secondary-btn vp-remove-btn" data-source="${escapeHtml(p.source)}" data-value="${escapeHtml(p.value)}" style="color:#f38ba8; border-color:#f38ba8; font-size:0.8em; padding:4px 10px;">🗑</button>
+        </div>
+    `).join('');
+
+    container.querySelectorAll('.vp-remove-btn').forEach(btn => {
+        btn.onclick = async () => {
+            const ok = await showConfirm(`¿Quitar '${btn.dataset.value}' de la lista?`, 'Quitar plugin');
+            if (!ok) return;
+            await removeVelocityPlugin(currentServerId, btn.dataset.source, btn.dataset.value);
+            listVelocityPlugins(currentServerId);
+        };
+    });
+}
+
 export function handleFileContentEvent(data) {
     if (data.scope === "packwiz") packwizExplorer.renderFileContent(data);
     else if (data.scope === "server_root") serverExplorer.renderFileContent(data);
@@ -103,6 +139,60 @@ export function initServerDetail() {
 
     const btnSvOpenOs = document.getElementById('btn-sv-open-os');
     if (btnSvOpenOs) btnSvOpenOs.onclick = () => openServerFolder(currentServerId);
+
+
+
+    // ==========================================
+    // PESTAÑA "PLUGINS (VELOCITY)"
+    // ==========================================
+    const btnAddModrinth = document.getElementById('btn-vp-add-modrinth');
+    if (btnAddModrinth) {
+        withGuard(btnAddModrinth, async () => {
+            const input = document.getElementById('vp-add-modrinth');
+            const value = input.value.trim();
+            if (!value) return;
+            await addVelocityPlugin(currentServerId, 'modrinth', value);
+            input.value = '';
+            listVelocityPlugins(currentServerId);
+        }, '⏳...');
+    }
+
+    const btnAddGithub = document.getElementById('btn-vp-add-github');
+    if (btnAddGithub) {
+        withGuard(btnAddGithub, async () => {
+            const input = document.getElementById('vp-add-github');
+            const value = input.value.trim();
+            if (!value) return;
+            if (!value.includes('/')) return alert("Formato esperado: autor/repositorio");
+            await addVelocityPlugin(currentServerId, 'github', value);
+            input.value = '';
+            listVelocityPlugins(currentServerId);
+        }, '⏳...');
+    }
+
+    const btnAddDirect = document.getElementById('btn-vp-add-direct');
+    if (btnAddDirect) {
+        withGuard(btnAddDirect, async () => {
+            const input = document.getElementById('vp-add-direct');
+            const value = input.value.trim();
+            if (!value) return;
+            if (!/^https?:\/\//i.test(value)) return alert("Tiene que ser una URL http(s) completa.");
+            await addVelocityPlugin(currentServerId, 'direct', value);
+            input.value = '';
+            listVelocityPlugins(currentServerId);
+        }, '⏳...');
+    }
+
+    const btnVpRefresh = document.getElementById('btn-vp-refresh');
+    if (btnVpRefresh) btnVpRefresh.onclick = () => listVelocityPlugins(currentServerId);
+
+    const btnVpSaveMcHint = document.getElementById('btn-vp-save-mc-hint');
+    if (btnVpSaveMcHint) {
+        withGuard(btnVpSaveMcHint, async () => {
+            const value = document.getElementById('vp-mc-version-hint').value.trim();
+            await setVelocityMcVersionHint(currentServerId, value || null);
+        }, '⏳...');
+    }
 
     // ==========================================
     // ACCIONES BÁSICAS DEL SERVIDOR
@@ -470,10 +560,44 @@ export async function openServerDetail(server) {
     if (defaultTab) defaultTab.click();
 
     await openLogs(server.id);
-    listPackwizMods(server.id);
 
+    const isVelocity = server.server_type === 'velocity';
+
+    // Pestaña principal: Packwiz vs Plugins de Velocity
+    document.getElementById('tab-btn-packwiz')?.classList.toggle('hidden', isVelocity);
+    document.getElementById('tab-btn-velocity-plugins')?.classList.toggle('hidden', !isVelocity);
+    document.getElementById('card-update-mods-packwiz')?.classList.toggle('hidden', isVelocity);
+
+    if (isVelocity) {
+        listVelocityPlugins(server.id);
+    } else {
+        listPackwizMods(server.id);
+    }
+
+    // Sub-pestañas de Archivos: para Velocity solo tiene sentido "Carpeta del Servidor"
     packwizExplorer.setServerId(server.id);
-    packwizExplorer.listFiles();
+    serverExplorer.setServerId(server.id);
+
+    const btnExplorerPackwiz = document.getElementById('btn-explorer-packwiz');
+    const btnExplorerServer = document.getElementById('btn-explorer-server');
+    const panelPackwiz = document.getElementById('explorer-panel-packwiz');
+    const panelServer = document.getElementById('explorer-panel-server');
+
+    if (isVelocity) {
+        btnExplorerPackwiz?.classList.add('hidden');
+        btnExplorerServer?.classList.add('active');
+        btnExplorerPackwiz?.classList.remove('active');
+        panelPackwiz?.classList.add('hidden');
+        panelServer?.classList.remove('hidden');
+        serverExplorer.listFiles();
+    } else {
+        btnExplorerPackwiz?.classList.remove('hidden');
+        btnExplorerPackwiz?.classList.add('active');
+        btnExplorerServer?.classList.remove('active');
+        panelPackwiz?.classList.remove('hidden');
+        panelServer?.classList.add('hidden');
+        packwizExplorer.listFiles();
+    }
 }
 
 export function updateDetailStatus(status) {

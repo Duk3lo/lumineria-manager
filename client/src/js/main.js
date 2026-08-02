@@ -2,7 +2,7 @@ import { listen } from './core/tauri.js';
 import { initTabs } from './ui/tabs.js';
 import { initConnection, restoreLastConnection } from './features/connection.js';
 import { initCreator } from './features/creator.js';
-import { initServerDetail, currentServerId, appendPackwizLog, appendUpdateLog, renderPackwizMods, handleFilesListEvent, handleFileContentEvent } from './ui/serverDetail.js';
+import { initServerDetail, currentServerId, appendPackwizLog, appendUpdateLog, renderPackwizMods, handleFilesListEvent, handleFileContentEvent, handleVelocityPluginsListEvent } from './ui/serverDetail.js';
 import { appendLine } from './features/logs.js';
 import { renderServers, updateStatus } from './ui/serverList.js';
 import { invoke_ws_action, listPackwizMods } from './features/actions.js';
@@ -58,6 +58,8 @@ document.addEventListener("DOMContentLoaded", async () => {
             handleFilesListEvent(data);
         } else if (data.type === "file_content") {
             handleFileContentEvent(data);
+        } else if (data.type === "velocity_plugins_list") {
+            handleVelocityPluginsListEvent(data);
         }
     });
 

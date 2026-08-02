@@ -48,6 +48,10 @@ pub fn run() {
             commands::servers::create_packwiz_directory,
             commands::servers::update_server,
             commands::servers::sync_pack_to_server,
+            commands::servers::list_velocity_plugins,
+            commands::servers::add_velocity_plugin,
+            commands::servers::remove_velocity_plugin,
+            commands::servers::set_velocity_mc_version_hint,
             // --- Versions ---
             commands::versions::fetch_neoforge_versions,
             commands::versions::fetch_forge_versions,

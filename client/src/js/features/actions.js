@@ -120,6 +120,21 @@ export async function updateAllServer(id, loaderVersion, updateMods = true, upda
     }
 }
 
+export async function listVelocityPlugins(id) {
+    await invoke('list_velocity_plugins', { id });
+}
+export async function addVelocityPlugin(id, source, value) {
+    updateStatus("Añadiendo plugin...", "#f9e2af");
+    await invoke('add_velocity_plugin', { id, source, value });
+}
+export async function removeVelocityPlugin(id, source, value) {
+    updateStatus("Eliminando plugin...", "#f9e2af");
+    await invoke('remove_velocity_plugin', { id, source, value });
+}
+export async function setVelocityMcVersionHint(id, mcVersion) {
+    await invoke('set_velocity_mc_version_hint', { id, mcVersion: mcVersion || null });
+}
+
 window.sendAction = sendAction;
 window.confirmDelete = confirmDelete;
 window.openServerFolder = openServerFolder;

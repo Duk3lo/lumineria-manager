@@ -10,6 +10,20 @@ pub enum ServerStatus {
     Unknown,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginSource {
+    Modrinth,
+    Github,
+    Direct,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VelocityPluginEntry {
+    pub source: PluginSource,
+    pub value: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServerInfo {
     pub id: String,
@@ -61,6 +75,23 @@ pub enum ClientRequest {
     ListServers,
     StartServer {
         id: String,
+    },
+    ListVelocityPlugins {
+        id: String,
+    },
+    AddVelocityPlugin {
+        id: String,
+        source: PluginSource,
+        value: String,
+    },
+    RemoveVelocityPlugin {
+        id: String,
+        source: PluginSource,
+        value: String,
+    },
+    SetVelocityMcVersionHint {
+        id: String,
+        mc_version: Option<String>,
     },
     ListPackwizFiles {
         id: String,
@@ -168,6 +199,10 @@ pub enum ClientRequest {
 pub enum ServerEvent {
     Servers {
         servers: Vec<ServerInfo>,
+    },
+    VelocityPluginsList {
+        id: String,
+        plugins: Vec<VelocityPluginEntry>,
     },
     ConsoleResponse {
         id: String,

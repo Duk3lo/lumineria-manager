@@ -100,6 +100,41 @@ pub async fn upload_mod_packwiz(state: tauri::State<'_, AppState>, id: String, f
     send(&state, ClientRequest::UploadModPackwiz { id, filename, data_base64, folder, scope }).await
 }
 
+
+#[tauri::command]
+pub async fn list_velocity_plugins(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {
+    send(&state, ClientRequest::ListVelocityPlugins { id }).await
+}
+
+#[tauri::command]
+pub async fn add_velocity_plugin(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    source: protocol::PluginSource,
+    value: String,
+) -> Result<(), String> {
+    send(&state, ClientRequest::AddVelocityPlugin { id, source, value }).await
+}
+
+#[tauri::command]
+pub async fn remove_velocity_plugin(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    source: protocol::PluginSource,
+    value: String,
+) -> Result<(), String> {
+    send(&state, ClientRequest::RemoveVelocityPlugin { id, source, value }).await
+}
+
+#[tauri::command]
+pub async fn set_velocity_mc_version_hint(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    mc_version: Option<String>,
+) -> Result<(), String> {
+    send(&state, ClientRequest::SetVelocityMcVersionHint { id, mc_version }).await
+}
+
 #[tauri::command]
 pub async fn update_server(
     state: State<'_, AppState>,

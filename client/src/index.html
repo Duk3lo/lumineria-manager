@@ -101,7 +101,9 @@
                 <div class="instance-tabs"
                     style="display: flex; gap: 10px; border-bottom: 2px solid #45475a; margin-bottom: 20px;">
                     <button class="tab-btn active" data-tab="tab-console">Terminal</button>
-                    <button class="tab-btn" data-tab="tab-packwiz">Mods (Packwiz)</button>
+                    <button class="tab-btn" id="tab-btn-packwiz" data-tab="tab-packwiz">Mods (Packwiz)</button>
+                    <button class="tab-btn hidden" id="tab-btn-velocity-plugins" data-tab="tab-velocity-plugins">🔌
+                        Plugins (Velocity)</button>
                     <button class="tab-btn" data-tab="tab-updates">Actualizaciones</button>
                     <button class="tab-btn" data-tab="tab-config">🗂️ Archivos</button>
                     <button id="btn-detail-delete" class="secondary-btn"
@@ -218,6 +220,84 @@
                         </div>
                     </div>
 
+                    <div id="tab-velocity-plugins" class="tab-pane hidden">
+                        <div
+                            style="background: #313244; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #45475a;">
+                            <h3 style="margin-top:0; color:#a6adc8;">ℹ️ Cómo funciona esto</h3>
+                            <p style="color:#cdd6f4; font-size:0.85em; margin:0;">
+                                Velocity es un proxy, no corre mods de Minecraft, así que no usa Packwiz. Los plugins
+                                listados acá
+                                se descargan automáticamente <strong>la próxima vez que el servidor arranque o se
+                                    reinicie</strong>,
+                                igual que el instalador del motor. No hay publicación para clientes: estos plugins solo
+                                viven en
+                                este servidor.
+                            </p>
+                        </div>
+
+                        <div style="background: #313244; padding: 20px; border-radius: 8px; margin-bottom: 15px;">
+                            <label style="font-size: 0.85em; color:#cdd6f4;">Versión de Minecraft de referencia
+                                (opcional, para filtrar compatibilidad en Modrinth)</label>
+                            <div style="display:flex; gap:10px; margin-top:8px;">
+                                <input type="text" id="vp-mc-version-hint" placeholder="Ej: 1.21.1"
+                                    style="flex:1; padding:8px;">
+                                <button id="btn-vp-save-mc-hint" class="secondary-btn">Guardar</button>
+                            </div>
+                            <p style="color:#6c7086; font-size:0.75em; margin: 8px 0 0;">
+                                Velocity no tiene "versión de Minecraft" propia. Esto le pasa una referencia opcional al
+                                buscador
+                                de Modrinth para plugins que filtran por versión de juego. Dejalo vacío si no hace
+                                falta.
+                            </p>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                            <div style="background: #313244; padding: 20px; border-radius: 8px;">
+                                <h3 style="margin-top:0; color: #a6e3a1;">🟢 Modrinth</h3>
+                                <p style="color: #cdd6f4; font-size: 0.8em;">Slug o ID del proyecto (ej: luckperms)</p>
+                                <div style="display:flex; gap:8px;">
+                                    <input type="text" id="vp-add-modrinth" placeholder="luckperms"
+                                        style="flex:1; padding:8px;">
+                                    <button id="btn-vp-add-modrinth" class="primary-btn"
+                                        style="background:#a6e3a1; color:#11111b;">+</button>
+                                </div>
+                            </div>
+                            <div style="background: #313244; padding: 20px; border-radius: 8px;">
+                                <h3 style="margin-top:0; color: #89b4fa;">🐙 GitHub Releases</h3>
+                                <p style="color: #cdd6f4; font-size: 0.8em;">autor/repositorio</p>
+                                <div style="display:flex; gap:8px;">
+                                    <input type="text" id="vp-add-github" placeholder="autor/repo"
+                                        style="flex:1; padding:8px;">
+                                    <button id="btn-vp-add-github" class="primary-btn"
+                                        style="background:#89b4fa; color:#11111b;">+</button>
+                                </div>
+                            </div>
+                            <div style="background: #313244; padding: 20px; border-radius: 8px;">
+                                <h3 style="margin-top:0; color: #fab387;">🔗 URL Directa</h3>
+                                <p style="color: #cdd6f4; font-size: 0.8em;">Link terminado en .jar</p>
+                                <div style="display:flex; gap:8px;">
+                                    <input type="text" id="vp-add-direct" placeholder="https://.../plugin.jar"
+                                        style="flex:1; padding:8px;">
+                                    <button id="btn-vp-add-direct" class="primary-btn"
+                                        style="background:#fab387; color:#11111b;">+</button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="background: #313244; padding: 20px; border-radius: 8px;">
+                            <h3
+                                style="margin-top:0; color: #cba6f7; display:flex; justify-content:space-between; align-items:center;">
+                                🔌 Plugins Configurados
+                                <button id="btn-vp-refresh" class="secondary-btn"
+                                    style="font-size:0.8rem; padding:5px 10px;">↻ Recargar</button>
+                            </h3>
+                            <div id="vp-plugins-list"
+                                style="max-height: 350px; overflow-y: auto; background:#1e1e2e; padding:10px; border-radius:5px; border:1px solid #45475a;">
+                                <p style="color:#6c7086; text-align:center; margin:20px 0;">Cargando...</p>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="tab-updates" class="tab-pane hidden">
                         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
                             <div
@@ -235,7 +315,7 @@
                                     style="width:100%; margin-top:8px; border-color:#fab387; color:#fab387;">🔧 Reparar
                                     (Reinstalar igual)</button>
                             </div>
-                            <div
+                            <div id="card-update-mods-packwiz"
                                 style="background: #313244; padding: 20px; border-radius: 8px; border: 1px solid #cba6f7;">
                                 <h3 style="margin-top:0; color: #cba6f7;">📦 Actualizar Mods (Packwiz)</h3>
                                 <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 15px;">
