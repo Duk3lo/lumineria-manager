@@ -54,6 +54,8 @@ pub fn run() {
             commands::servers::set_velocity_mc_version_hint,
             commands::servers::sync_velocity_plugins,
             commands::servers::set_motd,
+            commands::servers::set_port,
+            commands::servers::upload_server_icon,
             // --- Versions ---
             commands::versions::fetch_neoforge_versions,
             commands::versions::fetch_forge_versions,

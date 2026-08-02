@@ -80,6 +80,10 @@ pub enum ClientRequest {
         id: String,
         motd: String,
     },
+    SetPort {
+        id: String,
+        port: u16,
+    },
     SyncVelocityPlugins {
         id: String,
     },

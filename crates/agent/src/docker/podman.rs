@@ -1,7 +1,7 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use std::path::Path;
 use std::process::Stdio;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
 use tokio::sync::mpsc;
 
@@ -126,27 +126,24 @@ pub async fn create_container(id: &str, dest_dir: &Path, image: &str) -> Result<
     Ok(())
 }
 
-pub async fn send_stdin_command(container_id: &str, command: &str) -> Result<()> {
-    let mut child = Command::new("podman")
-        .args(["exec", "-i", container_id, "sh", "-c", "cat > /proc/1/fd/0"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .context("no pude ejecutar podman exec")?;
+pub async fn send_stdin_command(container_id: &str, command: &str) -> anyhow::Result<()> {
+    let output = tokio::process::Command::new("podman")
+        .args([
+            "exec",
+            "-i",
+            container_id,
+            "sh",
+            "-c",
+            "echo \"$1\" > /data/console.in",
+            "--",
+            command,
+        ])
+        .output()
+        .await?;
 
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(format!("{command}\n").as_bytes())
-            .await
-            .context("no pude escribir el comando")?;
-        stdin.shutdown().await.ok();
-    }
-
-    let output = child.wait_with_output().await?;
     if !output.status.success() {
         let err = String::from_utf8_lossy(&output.stderr);
-        bail!("podman exec falló: {}", err.trim());
+        anyhow::bail!("Fallo al enviar comando: {}", err.trim());
     }
     Ok(())
 }

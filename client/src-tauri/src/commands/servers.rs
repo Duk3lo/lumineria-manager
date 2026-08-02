@@ -112,6 +112,16 @@ pub async fn set_motd(state: State<'_, AppState>, id: String, motd: String) -> R
 }
 
 #[tauri::command]
+pub async fn set_port(state: State<'_, AppState>, id: String, port: u16) -> Result<(), String> {
+    send(&state, ClientRequest::SetPort { id, port }).await
+}
+
+#[tauri::command]
+pub async fn upload_server_icon(state: State<'_, AppState>, id: String, data_base64: String) -> Result<(), String> {
+    send(&state, ClientRequest::UploadServerIcon { id, data_base64 }).await
+}
+
+#[tauri::command]
 pub async fn add_velocity_plugin(
     state: tauri::State<'_, AppState>,
     id: String,

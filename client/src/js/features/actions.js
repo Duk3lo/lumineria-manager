@@ -144,6 +144,15 @@ export async function setMotd(id, motd) {
     await invoke('set_motd', { id, motd });
 }
 
+export async function setPort(id, port) {
+    await invoke('set_port', { id, port });
+}
+
+export async function uploadServerIcon(id, dataBase64) {
+    updateStatus("Subiendo ícono del servidor...", "#f9e2af");
+    await invoke('upload_server_icon', { id, dataBase64 });
+}
+
 window.sendAction = sendAction;
 window.confirmDelete = confirmDelete;
 window.openServerFolder = openServerFolder;

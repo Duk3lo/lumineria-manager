@@ -348,11 +348,25 @@ pub async fn write_start_script(
     } else {
         format!("java -Xms{min_ram} -Xmx{max_ram} -jar {jar_name} nogui")
     };
-    write_launch_script(dest_dir, &format!("#!/bin/sh\ncd /data\nexec {launch}\n")).await
+
+    let script = format!(
+        "#!/bin/sh\n\
+        cd /data\n\
+        rm -f /data/console.in\n\
+        mkfifo /data/console.in\n\
+        tail -f /data/console.in | exec {}\n",
+        launch
+    );
+    write_launch_script(dest_dir, &script).await
 }
 
 pub async fn write_start_script_run_sh(dest_dir: &Path) -> Result<()> {
-    write_launch_script(dest_dir, "#!/bin/sh\ncd /data\nexec sh run.sh nogui\n").await
+    let script = "#!/bin/sh\n\
+        cd /data\n\
+        rm -f /data/console.in\n\
+        mkfifo /data/console.in\n\
+        tail -f /data/console.in | exec sh run.sh nogui\n";
+    write_launch_script(dest_dir, script).await
 }
 
 const PACKWIZ_INSTALLER_BOOTSTRAP_URL: &str = "https://github.com/packwiz/packwiz-installer-bootstrap/releases/download/v0.0.3/packwiz-installer-bootstrap.jar";

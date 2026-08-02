@@ -3,7 +3,8 @@ import {
     addMod, removeMod, uploadMod, publishModpack, syncPackToServer,
     listPackwizMods, unpublishModpack, sendConsoleCommand, listPackwizFiles,
     readFile, writeFile, deleteFile, createDirectory, updateAllServer,
-    listVelocityPlugins, addVelocityPlugin, removeVelocityPlugin, setVelocityMcVersionHint, syncVelocityPluginsNow
+    listVelocityPlugins, addVelocityPlugin, removeVelocityPlugin, setVelocityMcVersionHint, syncVelocityPluginsNow,
+    setMotd, setPort, uploadServerIcon
 } from '../features/actions.js';
 import { openLogs, closeLogs } from '../features/logs.js';
 import { appendLine } from '../features/logs.js';
@@ -161,9 +162,45 @@ export function initServerDetail() {
     const btnMotd = document.getElementById('btn-set-motd');
     if (btnMotd) {
         withGuard(btnMotd, async () => {
-            const motd = prompt("Nuevo MOTD (mensaje del día):");
-            if (motd) await setMotd(currentServerId, motd);
+            const input = document.getElementById('motd-input');
+            const motd = input.value.trim();
+            if (!motd) return alert("Escribe un MOTD.");
+            await setMotd(currentServerId, motd);
         });
+    }
+
+    const btnPort = document.getElementById('btn-set-port');
+    if (btnPort) {
+        withGuard(btnPort, async () => {
+            const input = document.getElementById('port-input');
+            const port = parseInt(input.value, 10);
+            if (!port || port < 1 || port > 65535) return alert("Puerto inválido (1-65535).");
+            const ok = await showConfirm(
+                `Vas a cambiar el puerto a ${port}.\nSe aplica recién la próxima vez que el servidor arranque o se reinicie.\n\n¿Continuar?`,
+                'Cambiar Puerto'
+            );
+            if (!ok) return;
+            await setPort(currentServerId, port);
+        });
+    }
+
+    const btnIcon = document.getElementById('btn-upload-icon');
+    if (btnIcon) {
+        withGuard(btnIcon, async () => {
+            const fileInput = document.getElementById('server-icon-input');
+            if (!fileInput || fileInput.files.length === 0) return alert("Selecciona una imagen");
+            const file = fileInput.files[0];
+            await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = async () => {
+                    const base64 = reader.result.split(',')[1];
+                    await uploadServerIcon(currentServerId, base64);
+                    resolve();
+                };
+                reader.readAsDataURL(file);
+            });
+            fileInput.value = "";
+        }, '⏳ Subiendo...');
     }
 
     const btnAddModrinth = document.getElementById('btn-vp-add-modrinth');
@@ -446,35 +483,7 @@ export function initServerDetail() {
         }, '⏳ Sincronizando...');
     }
 
-    const btnUpload = document.getElementById('btn-pw-upload');
-    if (btnUpload) {
-        withGuard(btnUpload, async () => {
-            const fileInput = document.getElementById('pw-upload-input');
-            if (!fileInput || fileInput.files.length === 0) return alert("Selecciona al menos un archivo");
 
-            const targetFolder = currentSelectedPath;
-            const totalFiles = fileInput.files.length; // 👈 guardado antes de limpiar el input
-
-            for (let i = 0; i < fileInput.files.length; i++) {
-                const file = fileInput.files[i];
-                const reader = new FileReader();
-
-                await new Promise((resolve) => {
-                    reader.onload = async () => {
-                        const base64 = reader.result.split(',')[1];
-                        await uploadMod(currentServerId, file.name, base64, targetFolder);
-                        resolve();
-                    };
-                    reader.readAsDataURL(file);
-                });
-            }
-
-            fileInput.value = "";
-            alert(`¡${totalFiles} archivo(s) subido(s) con éxito!`);
-            listPackwizFiles(currentServerId);
-            listPackwizMods(currentServerId);
-        }, '⏳ Subiendo...');
-    }
 
     const btnRefreshTree = document.getElementById('btn-pw-refresh-tree');
     if (btnRefreshTree) btnRefreshTree.onclick = () => listPackwizFiles(currentServerId);
@@ -529,35 +538,6 @@ export function initServerDetail() {
         btnRefreshMods.onclick = () => listPackwizMods(currentServerId);
     }
 
-    const btnSaveFile = document.getElementById('btn-pw-save-file');
-    if (btnSaveFile) {
-        withGuard(btnSaveFile, async () => {
-            const content = document.getElementById('pw-file-editor').value;
-            await writeFile(currentServerId, currentSelectedPath, content);
-        }, '⏳ Guardando...');
-    }
-
-    const btnDeleteFile = document.getElementById('btn-pw-delete-file');
-    if (btnDeleteFile) {
-        withGuard(btnDeleteFile, async () => {
-            const ok = await showConfirm(`¿Estás seguro de eliminar '${currentSelectedPath}'?\nEsto lo quitará del modpack.`, 'Eliminar Archivo');
-            if (!ok) return;
-
-            await deleteFile(currentServerId, currentSelectedPath);
-
-            currentSelectedPath = ".";
-            document.getElementById('pw-selected-path').innerText = "/ (Raíz)";
-            document.getElementById('pw-folder-panel').style.display = 'flex';
-            document.getElementById('pw-folder-panel').classList.remove('hidden');
-            document.getElementById('pw-file-panel').style.display = 'none';
-            document.getElementById('pw-file-panel').classList.add('hidden');
-
-            setTimeout(() => {
-                listPackwizFiles(currentServerId);
-                listPackwizMods(currentServerId);
-            }, 500);
-        });
-    }
 }
 
 export async function openServerDetail(server) {
@@ -571,6 +551,9 @@ export async function openServerDetail(server) {
 
     const publishInput = document.getElementById('pw-publish-input');
     if (publishInput) publishInput.value = server.id;
+
+    const portInput = document.getElementById('port-input');
+    if (portInput) portInput.value = server.port;
 
     if (viewGrid) viewGrid.classList.add('hidden');
     const connView = document.getElementById('view-connection');
