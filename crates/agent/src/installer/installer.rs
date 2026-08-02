@@ -34,7 +34,9 @@ pub async fn download_file(
             Err(e) => {
                 let _ = tx.send(ServerEvent::PackwizLog {
                     id: server_id.to_string(),
-                    line: format!("⚠️ Intento {attempt}/{MAX_RETRIES} falló descargando {url}: {e}"),
+                    line: format!(
+                        "⚠️ Intento {attempt}/{MAX_RETRIES} falló descargando {url}: {e}"
+                    ),
                 });
                 last_err = Some(e);
                 if attempt < MAX_RETRIES {
@@ -46,9 +48,11 @@ pub async fn download_file(
 
     let e = last_err.unwrap();
     let chain: Vec<String> = e.chain().map(|c| c.to_string()).collect();
-    bail!("No pude descargar {url} tras {MAX_RETRIES} intentos. Causa: {}", chain.join(" → "));
+    bail!(
+        "No pude descargar {url} tras {MAX_RETRIES} intentos. Causa: {}",
+        chain.join(" → ")
+    );
 }
-
 
 async fn try_download_once(
     client: &reqwest::Client,
@@ -129,7 +133,14 @@ pub async fn install_fabric(
 
     let installer_path = dest_dir.join("fabric-installer.jar");
 
-    download_file(&installer_url, &installer_path, server_id, "Descargando Fabric Installer", tx).await?;
+    download_file(
+        &installer_url,
+        &installer_path,
+        server_id,
+        "Descargando Fabric Installer",
+        tx,
+    )
+    .await?;
 
     let _ = tx.send(ServerEvent::InstallProgress {
         id: server_id.to_string(),
@@ -138,6 +149,7 @@ pub async fn install_fabric(
     });
 
     let vol_data = format!("{}:/data:Z", dest_dir.display());
+    let xmx = format!("-Xmx{max_ram}");
 
     let mut child = Command::new("podman")
         .args([
@@ -152,6 +164,7 @@ pub async fn install_fabric(
             "/data",
             image,
             "java",
+            &xmx,
             "-jar",
             "fabric-installer.jar",
             "server",
@@ -194,7 +207,44 @@ pub async fn install_mod_installer(
     image: &str,
 ) -> Result<()> {
     let installer_path = dest_dir.join(installer_name);
-    download_file(url, &installer_path, server_id, "Descargando Instalador", tx).await?;
+    download_file(
+        url,
+        &installer_path,
+        server_id,
+        "Descargando Instalador",
+        tx,
+    )
+    .await?;
+
+    let _ = tx.send(ServerEvent::InstallProgress {
+        id: server_id.to_string(),
+        step: "Extrayendo librerías en Podman... (Tomará un momento)".to_string(),
+        percentage: 50,
+    });
+
+    let vol_data = format!("{}:/data:Z", dest_dir.display());
+    let xmx = format!("-Xmx{max_ram}");
+
+    let output = Command::new("podman")
+        .args([
+            "run",
+            "--rm",
+            "--network",
+            "host",
+            "--userns=keep-id",
+            "-v",
+            &vol_data,
+            "-w",
+            "/data",
+            image,
+            "java",
+            &xmx,
+            "-jar",
+            installer_name,
+            "--installServer",
+        ])
+        .output()
+        .await?;
 
     let _ = tx.send(ServerEvent::InstallProgress {
         id: server_id.to_string(),
@@ -461,7 +511,14 @@ pub async fn install_papermc(
         .ok_or_else(|| anyhow::anyhow!("No se encontró la url de descarga"))?;
 
     let output_path = dest_dir.join(&jar_name);
-    download_file(download_url, &output_path, server_id, "Descargando Motor", tx).await?;
+    download_file(
+        download_url,
+        &output_path,
+        server_id,
+        "Descargando Motor",
+        tx,
+    )
+    .await?;
     write_start_script(dest_dir, project, min_ram, max_ram, &jar_name).await?;
 
     Ok((jar_name, build_number))
@@ -471,10 +528,14 @@ pub async fn latest_velocity_version(client: &reqwest::Client) -> Result<String>
     let url = format!("{}/velocity", PAPER_API_BASE);
     let response = client.get(&url).header("User-Agent", UA).send().await?;
     if !response.status().is_success() {
-        bail!("HTTP {} al consultar versiones de Velocity", response.status());
+        bail!(
+            "HTTP {} al consultar versiones de Velocity",
+            response.status()
+        );
     }
     let json: Value = response.json().await?;
-    let versions_obj = json["versions"].as_object()
+    let versions_obj = json["versions"]
+        .as_object()
         .ok_or_else(|| anyhow::anyhow!("Formato inesperado: falta 'versions'"))?;
 
     let mut candidates: Vec<String> = versions_obj
@@ -488,19 +549,38 @@ pub async fn latest_velocity_version(client: &reqwest::Client) -> Result<String>
 
     for version in candidates.into_iter().rev() {
         let builds_url = format!("{}/velocity/versions/{}/builds", PAPER_API_BASE, version);
-        let Ok(res) = client.get(&builds_url).header("User-Agent", UA).send().await else { continue };
-        if !res.status().is_success() { continue; }
-        let Ok(builds): Result<Value, _> = res.json().await else { continue };
-        let has_good_build = builds.as_array().map(|arr| {
-            arr.iter().any(|b| matches!(b["channel"].as_str(), Some("STABLE") | Some("RECOMMENDED")))
-        }).unwrap_or(false);
-        if has_good_build { return Ok(version); }
+        let Ok(res) = client
+            .get(&builds_url)
+            .header("User-Agent", UA)
+            .send()
+            .await
+        else {
+            continue;
+        };
+        if !res.status().is_success() {
+            continue;
+        }
+        let Ok(builds): Result<Value, _> = res.json().await else {
+            continue;
+        };
+        let has_good_build = builds
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .any(|b| matches!(b["channel"].as_str(), Some("STABLE") | Some("RECOMMENDED")))
+            })
+            .unwrap_or(false);
+        if has_good_build {
+            return Ok(version);
+        }
     }
     bail!("No encontré ninguna versión de Velocity con build estable disponible")
 }
 
 fn version_sort_key(v: &str) -> Vec<u32> {
-    v.split('-').next().unwrap_or(v)
+    v.split('-')
+        .next()
+        .unwrap_or(v)
         .split('.')
         .map(|p| p.parse::<u32>().unwrap_or(0))
         .collect()

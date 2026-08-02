@@ -136,7 +136,7 @@ pub(crate) async fn create_server(
             _ => Ok(()),
         };
         if let Err(e) = result {
-            let _ = tokio::fs::remove_dir_all(&dest_dir).await;
+            //let _ = tokio::fs::remove_dir_all(&dest_dir).await;
             let _ = tx_clone.send(ServerEvent::Error {
                 message: format!("Error de instalación: {e}. Se limpiaron los archivos parciales, podés reintentar con el mismo nombre."),
             });
