@@ -60,14 +60,20 @@ pub(crate) async fn create_server(
             percentage: 5,
         });
 
-        // 👇 AQUI ESTABA EL ERROR: Ya NO pasamos rcon_creds
-        if config::write_server_env(&dest_dir, &cfg).await.is_err()
-            || config::write_server_properties(&dest_dir, &cfg).await.is_err()
-        {
+        if config::write_server_env(&dest_dir, &cfg).await.is_err() {
             let _ = tx_clone.send(ServerEvent::Error {
                 message: "Error al escribir configuraciones locales.".into(),
             });
             return;
+        }
+
+        if cfg.server_type != "velocity" {
+            if config::write_server_properties(&dest_dir, &cfg).await.is_err() {
+                let _ = tx_clone.send(ServerEvent::Error {
+                    message: "Error al escribir configuraciones locales.".into(),
+                });
+                return;
+            }
         }
         
         let _ = tokio::fs::write(dest_dir.join("eula.txt"), "eula=true\n").await;

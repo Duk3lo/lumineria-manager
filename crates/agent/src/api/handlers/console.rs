@@ -53,7 +53,7 @@ pub(crate) async fn send_console_command(
     command: String,
 ) {
     let tx_clone = tx.clone();
-    
+
     tokio::spawn(async move {
         if !podman::is_running(&id).await {
             let _ = tx_clone.send(ServerEvent::Error {
@@ -65,10 +65,6 @@ pub(crate) async fn send_console_command(
         // Enviamos el comando directamente por Podman, olvidándonos de RCON
         match podman::send_stdin_command(&id, &command).await {
             Ok(()) => {
-                let _ = tx_clone.send(ServerEvent::ConsoleResponse {
-                    id,
-                    response: "(comando enviado — mirá la respuesta en la consola)".into(),
-                });
             }
             Err(e) => {
                 let _ = tx_clone.send(ServerEvent::Error {
