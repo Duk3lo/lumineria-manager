@@ -117,7 +117,6 @@ pub(crate) async fn handle_request(
             files::create_directory(state, tx, id, path, scope).await
         }
         ClientRequest::SyncVelocityPlugins { id } => plugins::sync_plugins_now(state, tx, id).await,
-
         ClientRequest::UploadServerIcon { id, data_base64 } => icon::upload_server_icon(state, tx, id, data_base64).await,
         ClientRequest::SetMotd { id, motd } => servers::set_motd(state, tx, id, motd).await,
         ClientRequest::SetPort { id, port } => servers::set_port(state, tx, id, port).await,
