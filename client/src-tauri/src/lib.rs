@@ -19,6 +19,8 @@ pub fn run() {
             commands::connection::connect_agent,
             commands::connection::load_last_connection,
             commands::connection::save_last_connection,
+            commands::connection::load_publish_config,
+            commands::connection::save_publish_config,
             // --- Servers / Docker ---
             commands::servers::list_servers,
             commands::servers::start_server,
@@ -38,8 +40,6 @@ pub fn run() {
             commands::servers::publish_packwiz,
             commands::servers::unpublish_packwiz,
             commands::servers::list_packwiz_mods,
-            commands::connection::load_publish_config,
-            commands::connection::save_publish_config,
             commands::servers::send_console_command,
             commands::servers::list_packwiz_files,
             commands::servers::read_packwiz_file,
