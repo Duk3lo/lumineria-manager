@@ -1,4 +1,3 @@
-
 use anyhow::{Context, Result};
 use protocol::{ServerInfo, ServerStatus};
 use std::collections::HashMap;
@@ -104,8 +103,10 @@ pub fn container_status(container_id: &str) -> ServerStatus {
             let s = String::from_utf8_lossy(&out.stdout).trim().to_string();
             match s.as_str() {
                 "running" => ServerStatus::Running,
-                "restarting" => ServerStatus::Restarting,
-                "exited" | "created" | "stopped" => ServerStatus::Stopped,
+                "stopping" | "restarting" => ServerStatus::Restarting,
+                "exited" | "created" | "stopped" | "configured" | "paused" | "removing" => {
+                    ServerStatus::Stopped
+                }
                 _ => ServerStatus::Unknown,
             }
         }

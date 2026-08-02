@@ -45,9 +45,9 @@ pub async fn sync_mods_now(container_id: &str) -> Result<()> {
     container_action("restart", container_id).await
 }
 
-pub async fn stream_logs(container_id: String, tx: mpsc::UnboundedSender<String>) -> Result<()> {
+pub async fn stream_logs(container_id: String, tail: &str, tx: mpsc::UnboundedSender<String>) -> Result<()> {
     let mut child = Command::new("podman")
-        .args(["logs", "-f", "--tail", "100", &container_id])
+        .args(["logs", "-f", "--tail", tail, &container_id])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;

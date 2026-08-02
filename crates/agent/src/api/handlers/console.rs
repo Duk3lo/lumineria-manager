@@ -15,17 +15,24 @@ pub(crate) async fn subscribe_logs(
             return;
         }
     }
+
     let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
     let container_id = id.clone();
     tokio::spawn(async move {
+        let mut first = true;
         loop {
             if line_tx.is_closed() {
                 break;
             }
-            if let Err(e) = podman::stream_logs(container_id.clone(), line_tx.clone()).await {
+            let tail = if first { "100" } else { "0" };
+            if let Err(e) = podman::stream_logs(container_id.clone(), tail, line_tx.clone()).await {
                 tracing::warn!("stream_logs para '{container_id}' terminó con error: {e}");
             }
+            first = false;
             if line_tx.is_closed() {
+                break;
+            }
+            if !podman::is_running(&container_id).await {
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
@@ -73,8 +80,7 @@ pub(crate) async fn send_console_command(
 
         // Enviamos el comando directamente por Podman, olvidándonos de RCON
         match podman::send_stdin_command(&id, &command).await {
-            Ok(()) => {
-            }
+            Ok(()) => {}
             Err(e) => {
                 let _ = tx_clone.send(ServerEvent::Error {
                     message: format!("No pude enviar el comando: {e}"),
