@@ -38,7 +38,11 @@ pub(crate) async fn list_plugins(
         let dir = requirements_dir(&root_clone, &id);
         let mut plugins = Vec::new();
 
-        for source in [PluginSource::Modrinth, PluginSource::Github, PluginSource::Direct] {
+        for source in [
+            PluginSource::Modrinth,
+            PluginSource::Github,
+            PluginSource::Direct,
+        ] {
             let path = dir.join(requirements_file_for(source));
             for value in read_lines(&path).await {
                 plugins.push(VelocityPluginEntry { source, value });
@@ -88,7 +92,10 @@ pub(crate) async fn add_plugin(
                 id: id.clone(),
                 line: format!("ℹ️ '{}' ya estaba en la lista, no se duplicó.", value),
             });
-            let _ = tx_clone.send(ServerEvent::Ack { ok: true, message: None });
+            let _ = tx_clone.send(ServerEvent::Ack {
+                ok: true,
+                message: None,
+            });
             return;
         }
 
@@ -193,5 +200,42 @@ pub(crate) async fn set_mc_version_hint(
                 format!("Versión de referencia para Modrinth guardada: {value}")
             }),
         });
+    });
+}
+
+pub(crate) async fn sync_plugins_now(state: &AppState, tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
+    let tx_clone = tx.clone();
+    let root_clone = state.root.clone();
+    tokio::spawn(async move {
+        let dest_dir = root_clone.join(&id);
+        let env_data = fs::read_to_string(dest_dir.join("server.env")).await.unwrap_or_default();
+        let server_type = env_data.lines()
+            .find_map(|l| l.strip_prefix("SERVER_TYPE="))
+            .map(|v| v.trim().trim_matches('"').to_string())
+            .unwrap_or_else(|| "paper".into());
+
+        let was_running = crate::docker::podman::is_running(&id).await;
+        if was_running {
+            let _ = tx_clone.send(ServerEvent::PackwizLog { id: id.clone(), line: "⏸️ Deteniendo el servidor para actualizar plugins...".into() });
+            if let Err(e) = crate::docker::podman::container_action("stop", &id).await {
+                let _ = tx_clone.send(ServerEvent::Error { message: format!("No pude detener el contenedor: {e}") });
+                return;
+            }
+        }
+
+        let result = crate::installer::plugin_downloader::sync_plugins(&server_type, &dest_dir, &id, &tx_clone).await;
+
+        if was_running {
+            let _ = tx_clone.send(ServerEvent::PackwizLog { id: id.clone(), line: "▶️ Reiniciando el servidor...".into() });
+            if let Err(e) = crate::docker::podman::container_action("start", &id).await {
+                let _ = tx_clone.send(ServerEvent::Error { message: format!("No pude reiniciar el contenedor: {e}") });
+                return;
+            }
+        }
+
+        match result {
+            Ok(()) => { let _ = tx_clone.send(ServerEvent::Ack { ok: true, message: Some("Plugins actualizados.".into()) }); }
+            Err(e) => { let _ = tx_clone.send(ServerEvent::Error { message: format!("Error al sincronizar plugins: {e}") }); }
+        }
     });
 }

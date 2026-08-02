@@ -52,6 +52,7 @@ pub fn run() {
             commands::servers::add_velocity_plugin,
             commands::servers::remove_velocity_plugin,
             commands::servers::set_velocity_mc_version_hint,
+            commands::servers::sync_velocity_plugins,
             // --- Versions ---
             commands::versions::fetch_neoforge_versions,
             commands::versions::fetch_forge_versions,

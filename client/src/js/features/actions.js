@@ -135,6 +135,11 @@ export async function setVelocityMcVersionHint(id, mcVersion) {
     await invoke('set_velocity_mc_version_hint', { id, mcVersion: mcVersion || null });
 }
 
+export async function syncVelocityPluginsNow(id) {
+    updateStatus("Actualizando plugins de Velocity...", "#f9e2af");
+    await invoke('sync_velocity_plugins', { id });
+}
+
 window.sendAction = sendAction;
 window.confirmDelete = confirmDelete;
 window.openServerFolder = openServerFolder;

@@ -17,16 +17,9 @@ pub(crate) async fn list_servers(state: &AppState, tx: &mpsc::UnboundedSender<Se
     }
 }
 
-pub(crate) async fn start_server(tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
-    run_action(tx, &id, podman::container_action("start", &id).await);
-}
 
 pub(crate) async fn stop_server(tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
     run_action(tx, &id, podman::container_action("stop", &id).await);
-}
-
-pub(crate) async fn restart_server(tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
-    run_action(tx, &id, podman::container_action("restart", &id).await);
 }
 
 pub(crate) async fn sync_mods(tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
@@ -55,6 +48,38 @@ pub(crate) async fn restart_stack(state: &AppState, tx: &mpsc::UnboundedSender<S
         "stack",
         podman::run_stack_script(&state.root, "restart-podman.sh").await,
     );
+}
+
+
+async fn read_server_type(root: &std::path::Path, id: &str) -> Option<String> {
+    let data = tokio::fs::read_to_string(root.join(id).join("server.env")).await.ok()?;
+    data.lines()
+        .find_map(|l| l.strip_prefix("SERVER_TYPE="))
+        .map(|v| v.trim().trim_matches('"').to_string())
+}
+
+pub(crate) async fn start_server(state: &AppState, tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
+    if let Some(server_type) = read_server_type(&state.root, &id).await {
+        if crate::installer::plugin_downloader::uses_direct_plugins(&server_type) {
+            let dest_dir = state.root.join(&id);
+            if let Err(e) = crate::installer::plugin_downloader::sync_plugins(&server_type, &dest_dir, &id, tx).await {
+                let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("⚠️ No pude sincronizar plugins antes de arrancar: {e}") });
+            }
+        }
+    }
+    run_action(tx, &id, podman::container_action("start", &id).await);
+}
+
+pub(crate) async fn restart_server(state: &AppState, tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
+    if let Some(server_type) = read_server_type(&state.root, &id).await {
+        if crate::installer::plugin_downloader::uses_direct_plugins(&server_type) {
+            let dest_dir = state.root.join(&id);
+            if let Err(e) = crate::installer::plugin_downloader::sync_plugins(&server_type, &dest_dir, &id, tx).await {
+                let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("⚠️ No pude sincronizar plugins antes de reiniciar: {e}") });
+            }
+        }
+    }
+    run_action(tx, &id, podman::container_action("restart", &id).await);
 }
 
 pub(crate) fn run_action(tx: &mpsc::UnboundedSender<ServerEvent>, id: &str, result: Result<()>) {

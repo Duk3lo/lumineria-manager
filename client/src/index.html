@@ -225,13 +225,12 @@
                             style="background: #313244; padding: 20px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #45475a;">
                             <h3 style="margin-top:0; color:#a6adc8;">ℹ️ Cómo funciona esto</h3>
                             <p style="color:#cdd6f4; font-size:0.85em; margin:0;">
-                                Velocity es un proxy, no corre mods de Minecraft, así que no usa Packwiz. Los plugins
-                                listados acá
-                                se descargan automáticamente <strong>la próxima vez que el servidor arranque o se
-                                    reinicie</strong>,
-                                igual que el instalador del motor. No hay publicación para clientes: estos plugins solo
-                                viven en
-                                este servidor.
+                                Esta sección descarga plugins directo desde Modrinth/GitHub/URL, sin pasar por Packwiz —
+                                ideal para plugins que no necesitás distribuir a los clientes. Se descargan
+                                automáticamente
+                                <strong>la próxima vez que el servidor arranque o se reinicie</strong>.
+                                En Paper/Folia convive con Packwiz (para mods de cliente, resourcepacks, o si preferís
+                                publicar modpack).
                             </p>
                         </div>
 
@@ -326,6 +325,17 @@
                                 <button id="btn-update-mods" class="primary-btn"
                                     style="background:#cba6f7; color:#11111b; width:100%;">Actualizar Solo los
                                     Mods</button>
+                            </div>
+                            <div id="card-update-plugins-velocity" class="hidden"
+                                style="background: #313244; padding: 20px; border-radius: 8px; border: 1px solid #cba6f7;">
+                                <h3 style="margin-top:0; color: #cba6f7;">🔌 Actualizar Plugins (Velocity)</h3>
+                                <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 15px;">
+                                    Vuelve a chequear Modrinth/GitHub/enlaces directos y descarga versiones nuevas.
+                                    Detiene y reinicia el servidor si estaba corriendo.
+                                </p>
+                                <button id="btn-update-velocity-plugins" class="primary-btn"
+                                    style="background:#cba6f7; color:#11111b; width:100%;">Actualizar Plugins
+                                    Ahora</button>
                             </div>
                         </div>
 

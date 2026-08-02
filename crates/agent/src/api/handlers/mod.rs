@@ -3,7 +3,7 @@ mod files;
 mod lifecycle;
 mod packwiz;
 mod servers;
-mod velocity;
+mod plugins;
 
 use super::state::AppState;
 use protocol::{ClientRequest, ServerEvent};
@@ -19,9 +19,9 @@ pub(crate) async fn handle_request(
 ) {
     match request {
         ClientRequest::ListServers => servers::list_servers(state, tx).await,
-        ClientRequest::StartServer { id } => servers::start_server(tx, id).await,
+        ClientRequest::StartServer { id } => servers::start_server(state, tx, id).await,
         ClientRequest::StopServer { id } => servers::stop_server(tx, id).await,
-        ClientRequest::RestartServer { id } => servers::restart_server(tx, id).await,
+        ClientRequest::RestartServer { id } => servers::restart_server(state, tx, id).await,
         ClientRequest::SyncMods { id } => servers::sync_mods(tx, id).await,
         ClientRequest::StartStack => servers::start_stack(state, tx).await,
         ClientRequest::StopStack => servers::stop_stack(state, tx).await,
@@ -101,20 +101,21 @@ pub(crate) async fn handle_request(
             files::delete_file(state, tx, id, path, scope).await
         }
 
-        ClientRequest::ListVelocityPlugins { id } => velocity::list_plugins(state, tx, id).await,
+        ClientRequest::ListVelocityPlugins { id } => plugins::list_plugins(state, tx, id).await,
         ClientRequest::AddVelocityPlugin { id, source, value } => {
-            velocity::add_plugin(state, tx, id, source, value).await
+            plugins::add_plugin(state, tx, id, source, value).await
         }
         ClientRequest::RemoveVelocityPlugin { id, source, value } => {
-            velocity::remove_plugin(state, tx, id, source, value).await
+            plugins::remove_plugin(state, tx, id, source, value).await
         }
         ClientRequest::SetVelocityMcVersionHint { id, mc_version } => {
-            velocity::set_mc_version_hint(state, tx, id, mc_version).await
+            plugins::set_mc_version_hint(state, tx, id, mc_version).await
         }
 
         ClientRequest::CreateDirectory { id, path, scope } => {
             files::create_directory(state, tx, id, path, scope).await
         }
+        ClientRequest::SyncVelocityPlugins { id } => plugins::sync_plugins_now(state, tx, id).await,
         ClientRequest::SyncPackToServer { id } => packwiz::sync_to_server(state, tx, id).await,
     }
 }

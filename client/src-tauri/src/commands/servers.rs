@@ -127,6 +127,11 @@ pub async fn remove_velocity_plugin(
 }
 
 #[tauri::command]
+pub async fn sync_velocity_plugins(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    send(&state, ClientRequest::SyncVelocityPlugins { id }).await
+}
+
+#[tauri::command]
 pub async fn set_velocity_mc_version_hint(
     state: tauri::State<'_, AppState>,
     id: String,

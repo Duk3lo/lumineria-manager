@@ -3,7 +3,7 @@ import {
     addMod, removeMod, uploadMod, publishModpack, syncPackToServer,
     listPackwizMods, unpublishModpack, sendConsoleCommand, listPackwizFiles,
     readFile, writeFile, deleteFile, createDirectory, updateAllServer,
-    listVelocityPlugins, addVelocityPlugin, removeVelocityPlugin, setVelocityMcVersionHint
+    listVelocityPlugins, addVelocityPlugin, removeVelocityPlugin, setVelocityMcVersionHint, syncVelocityPluginsNow
 } from '../features/actions.js';
 import { openLogs, closeLogs } from '../features/logs.js';
 import { appendLine } from '../features/logs.js';
@@ -145,6 +145,19 @@ export function initServerDetail() {
     // ==========================================
     // PESTAÑA "PLUGINS (VELOCITY)"
     // ==========================================
+
+    const btnUpdateVelocityPlugins = document.getElementById('btn-update-velocity-plugins');
+    if (btnUpdateVelocityPlugins) {
+        withGuard(btnUpdateVelocityPlugins, async () => {
+            const ok = await showConfirm(
+                `Esto va a:\n• Volver a chequear Modrinth/GitHub/enlaces directos\n• Detener y reiniciar el servidor si estaba corriendo\n\n¿Continuar?`,
+                'Actualizar Plugins de Velocity'
+            );
+            if (!ok) return;
+            await syncVelocityPluginsNow(currentServerId);
+        }, '⏳ Actualizando...');
+    }
+
     const btnAddModrinth = document.getElementById('btn-vp-add-modrinth');
     if (btnAddModrinth) {
         withGuard(btnAddModrinth, async () => {
@@ -564,15 +577,17 @@ export async function openServerDetail(server) {
     const isVelocity = server.server_type === 'velocity';
 
     // Pestaña principal: Packwiz vs Plugins de Velocity
-    document.getElementById('tab-btn-packwiz')?.classList.toggle('hidden', isVelocity);
-    document.getElementById('tab-btn-velocity-plugins')?.classList.toggle('hidden', !isVelocity);
-    document.getElementById('card-update-mods-packwiz')?.classList.toggle('hidden', isVelocity);
+    const isVelocity = server.server_type === 'velocity';
+    const isModLoader = ['fabric', 'forge', 'neoforge', 'arclight'].includes(server.server_type);
+    const usesDirectPlugins = !isModLoader; // paper, folia, spigot, velocity
 
-    if (isVelocity) {
-        listVelocityPlugins(server.id);
-    } else {
-        listPackwizMods(server.id);
-    }
+    document.getElementById('tab-btn-packwiz')?.classList.toggle('hidden', isVelocity);
+    document.getElementById('tab-btn-velocity-plugins')?.classList.toggle('hidden', !usesDirectPlugins);
+    document.getElementById('card-update-mods-packwiz')?.classList.toggle('hidden', isVelocity);
+    document.getElementById('card-update-plugins-velocity')?.classList.toggle('hidden', !usesDirectPlugins);
+
+    if (usesDirectPlugins) listVelocityPlugins(server.id);
+    if (!isVelocity) listPackwizMods(server.id);
 
     // Sub-pestañas de Archivos: para Velocity solo tiene sentido "Carpeta del Servidor"
     packwizExplorer.setServerId(server.id);

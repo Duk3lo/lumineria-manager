@@ -1,7 +1,7 @@
 use super::super::state::{with_busy_guard, AppState};
 use super::super::utils::read_env_value;
 use crate::docker::podman;
-use crate::installer::{config, installer};
+use crate::installer::{config, installer, plugin_downloader};
 use anyhow::Result;
 use protocol::{ServerConfigParams, ServerEvent};
 use std::collections::HashMap;
@@ -142,6 +142,11 @@ pub(crate) async fn create_server(
             });
             return;
         }
+
+        if plugin_downloader::uses_direct_plugins(&cfg.server_type) {
+            let _ = plugin_downloader::sync_plugins(&cfg.server_type, &dest_dir, &id, &tx_clone).await;
+        }
+        
         let _ = tx_clone.send(ServerEvent::InstallProgress {
             id: id.clone(),
             step: "Creando contenedor".into(),

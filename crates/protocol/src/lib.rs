@@ -76,6 +76,9 @@ pub enum ClientRequest {
     StartServer {
         id: String,
     },
+    SyncVelocityPlugins {
+        id: String,
+    },
     ListVelocityPlugins {
         id: String,
     },
