@@ -18,8 +18,17 @@ pub(crate) async fn subscribe_logs(
     let (line_tx, mut line_rx) = mpsc::unbounded_channel::<String>();
     let container_id = id.clone();
     tokio::spawn(async move {
-        if let Err(e) = podman::stream_logs(container_id, line_tx).await {
-            tracing::warn!("stream_logs terminó con error: {e}");
+        loop {
+            if line_tx.is_closed() {
+                break;
+            }
+            if let Err(e) = podman::stream_logs(container_id.clone(), line_tx.clone()).await {
+                tracing::warn!("stream_logs para '{container_id}' terminó con error: {e}");
+            }
+            if line_tx.is_closed() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
         }
     });
     let event_tx = tx.clone();

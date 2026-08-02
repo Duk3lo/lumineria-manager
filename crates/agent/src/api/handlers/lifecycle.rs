@@ -78,66 +78,51 @@ pub(crate) async fn create_server(
         
         let _ = tokio::fs::write(dest_dir.join("eula.txt"), "eula=true\n").await;
         let image = podman::java_image_for(&cfg.server_type, &cfg.mc_version);
-        let result = match cfg.server_type.as_str() {
-            "paper" | "velocity" | "folia" => installer::install_papermc(
-                &client,
-                &cfg.server_type,
-                &cfg.mc_version,
-                &dest_dir,
-                &id,
-                &tx_clone,
-                &cfg.min_ram,
-                &cfg.max_ram,
-            )
-            .await
-            .map(|_| ()),
-            "fabric" => {
-                let loader = cfg.loader_version.clone().unwrap_or_default();
-                installer::install_fabric(
-                    &client,
-                    &cfg.mc_version,
-                    &loader,
-                    &dest_dir,
-                    &id,
-                    &tx_clone,
-                    &cfg.min_ram,
-                    &cfg.max_ram,
-                    image,
-                )
-                .await
-            }
-            "neoforge" => {
-                let loader = cfg.loader_version.clone().unwrap_or_default();
-                let url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar", loader);
-                installer::install_mod_installer(
-                    &url,
-                    &format!("neoforge-{}-installer.jar", loader),
-                    &dest_dir,
-                    &id,
-                    &tx_clone,
-                    &cfg.min_ram,
-                    &cfg.max_ram,
-                    image,
-                )
-                .await
-            }
-            "forge" => {
-                let loader = cfg.loader_version.clone().unwrap_or_default();
-                let url = format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{0}/forge-{0}-installer.jar", loader);
-                installer::install_mod_installer(
-                    &url,
-                    &format!("forge-{}-installer.jar", loader),
-                    &dest_dir,
-                    &id,
-                    &tx_clone,
-                    &cfg.min_ram,
-                    &cfg.max_ram,
-                    image,
-                )
-                .await
-            }
-            _ => Ok(()),
-        };
+        let mut engine_build_id: Option<String> = None;
+
+let result: Result<()> = match cfg.server_type.as_str() {
+    "paper" | "velocity" | "folia" => installer::install_papermc(
+        &client,
+        &cfg.server_type,
+        &cfg.mc_version,
+        &dest_dir,
+        &id,
+        &tx_clone,
+        &cfg.min_ram,
+        &cfg.max_ram,
+    )
+    .await
+    .map(|(_, build_number)| {
+        engine_build_id = Some(build_number);
+    }),
+    "fabric" => {
+        let loader = cfg.loader_version.clone().unwrap_or_default();
+        engine_build_id = Some(loader.clone());
+        installer::install_fabric(
+            &client, &cfg.mc_version, &loader, &dest_dir, &id, &tx_clone,
+            &cfg.min_ram, &cfg.max_ram, image,
+        ).await
+    }
+    "neoforge" => {
+        let loader = cfg.loader_version.clone().unwrap_or_default();
+        engine_build_id = Some(loader.clone());
+        let url = format!("https://maven.neoforged.net/releases/net/neoforged/neoforge/{0}/neoforge-{0}-installer.jar", loader);
+        installer::install_mod_installer(
+            &url, &format!("neoforge-{}-installer.jar", loader), &dest_dir, &id, &tx_clone,
+            &cfg.min_ram, &cfg.max_ram, image,
+        ).await
+    }
+    "forge" => {
+        let loader = cfg.loader_version.clone().unwrap_or_default();
+        engine_build_id = Some(loader.clone());
+        let url = format!("https://maven.minecraftforge.net/net/minecraftforge/forge/{0}/forge-{0}-installer.jar", loader);
+        installer::install_mod_installer(
+            &url, &format!("forge-{}-installer.jar", loader), &dest_dir, &id, &tx_clone,
+            &cfg.min_ram, &cfg.max_ram, image,
+        ).await
+    }
+    _ => Ok(()),
+};
         if let Err(e) = result {
             let _ = tokio::fs::remove_dir_all(&dest_dir).await;
             let _ = tx_clone.send(ServerEvent::Error {
@@ -146,9 +131,13 @@ pub(crate) async fn create_server(
             return;
         }
 
-        if plugin_downloader::uses_direct_plugins(&cfg.server_type) {
-            let _ = plugin_downloader::sync_plugins(&cfg.server_type, &dest_dir, &id, &tx_clone).await;
+        if let Some(build) = &engine_build_id {
+            let _ = config::update_env_key(&dest_dir, "ENGINE_BUILD", build).await;
         }
+
+if plugin_downloader::uses_direct_plugins(&cfg.server_type) {
+    let _ = plugin_downloader::sync_plugins(&cfg.server_type, &dest_dir, &id, &tx_clone).await;
+}
         
         let _ = tx_clone.send(ServerEvent::InstallProgress {
             id: id.clone(),
