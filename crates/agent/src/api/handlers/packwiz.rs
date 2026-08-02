@@ -1,5 +1,4 @@
 use super::super::state::{with_busy_guard, AppState};
-use super::super::utils::{base_dir_for_scope, safe_join};
 use crate::docker::podman;
 use crate::installer::installer;
 use protocol::{PackwizImage, ServerEvent};
@@ -273,13 +272,12 @@ pub(crate) async fn upload_mod(
             return;
         }
 
-        let base = base_dir_for_scope(&root_clone, &id, scope);
-
+        let base = crate::api::utils::base_dir_for_scope(&root_clone, &id, scope);
         let is_root = folder.is_empty() || folder == "." || folder == "root";
         let target_dir = if is_root {
             base.clone()
         } else {
-            match safe_join(&base, &folder) {
+            match crate::api::utils::safe_join(&base, &folder) {
                 Ok(p) => p,
                 Err(e) => {
                     let _ = tx_clone.send(ServerEvent::PackwizLog {
@@ -294,14 +292,7 @@ pub(crate) async fn upload_mod(
 
         let _ = tx_clone.send(ServerEvent::PackwizLog {
             id: id.clone(),
-            line: if is_root {
-                format!("> Subiendo archivo '{}' a la raíz...", filename)
-            } else {
-                format!(
-                    "> Subiendo archivo '{}' a la carpeta '{}'...",
-                    filename, folder
-                )
-            },
+            line: format!("> Subiendo archivo '{}'...", filename),
         });
 
         match STANDARD.decode(&data_base64) {
@@ -317,32 +308,18 @@ pub(crate) async fn upload_mod(
 
                 if scope == protocol::FileScope::Packwiz {
                     let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
-                    let relative_file_path = if is_root {
-                        filename.clone()
-                    } else {
-                        format!("{}/{}", folder, filename)
-                    };
-                    
+                    // Usamos refresh para que indexe el .jar sin hacer preguntas interactivas
                     let out = tokio::process::Command::new(&packwiz_bin)
                         .arg("refresh")
-
                         .current_dir(&base)
                         .output()
                         .await;
-                        
                     if let Ok(o) = out {
                         let log_out = String::from_utf8_lossy(&o.stdout);
                         if !log_out.is_empty() {
                             let _ = tx_clone.send(ServerEvent::PackwizLog {
                                 id: id.clone(),
                                 line: log_out.to_string(),
-                            });
-                        }
-                        if o.status.success() && is_client_only_file(&folder, &filename) {
-                            force_side_client(&base, &relative_file_path).await;
-                            let _ = tx_clone.send(ServerEvent::PackwizLog {
-                                id: id.clone(),
-                                line: "ℹ️ Marcado como 'solo cliente': no se copiará a este servidor al sincronizar.".into(),
                             });
                         }
                     }
@@ -650,70 +627,92 @@ pub(crate) async fn list_mods(
     let root_clone = state.root.clone();
     tokio::spawn(async move {
         let packwiz_dir = root_clone.join(&id).join("packwiz");
+        let index_path = packwiz_dir.join("index.toml");
+        
         let mut files_list = Vec::new();
+        let mut index_sides: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        
+        // Leemos index.toml para saber qué lado tienen los .jar custom
+        if let Ok(index_content) = tokio::fs::read_to_string(&index_path).await {
+            let mut current_file = String::new();
+            for line in index_content.lines() {
+                let line = line.trim();
+                if line.starts_with("file =") {
+                    current_file = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                }
+                if line.starts_with("meta.side =") {
+                    let side = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                    if !current_file.is_empty() {
+                        index_sides.insert(current_file.clone(), side);
+                    }
+                }
+            }
+        }
 
         let categories = vec!["mods", "resourcepacks", "shaderpacks", "plugins", "config"];
 
         for category in categories {
             let target_dir = packwiz_dir.join(category);
-            if !target_dir.exists() {
-                continue;
-            }
+            if !target_dir.exists() { continue; }
 
-            if let Ok(mut entries) = tokio::fs::read_dir(target_dir).await {
+            if let Ok(mut entries) = tokio::fs::read_dir(&target_dir).await {
                 while let Ok(Some(entry)) = entries.next_entry().await {
                     let path = entry.path();
-                    if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
+                    let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+                    let display_filename = format!("{}/{}", category, name);
+
+                    if ext == "toml" {
                         if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                            let mut name = String::new();
-                            let mut filename = String::new();
+                            let mut mod_name = String::new();
+                            let mut mod_filename = String::new();
                             let mut side = "both".to_string();
 
                             for line in content.lines() {
                                 let line = line.trim();
                                 if line.starts_with("name =") {
-                                    name = line
-                                        .split('=')
-                                        .nth(1)
-                                        .unwrap_or_default()
-                                        .replace('"', "")
-                                        .trim()
-                                        .to_string();
+                                    mod_name = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
                                 }
                                 if line.starts_with("filename =") {
-                                    filename = line
-                                        .split('=')
-                                        .nth(1)
-                                        .unwrap_or_default()
-                                        .replace('"', "")
-                                        .trim()
-                                        .to_string();
+                                    mod_filename = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
                                 }
                                 if line.starts_with("side =") {
-                                    side = line
-                                        .split('=')
-                                        .nth(1)
-                                        .unwrap_or_default()
-                                        .replace('"', "")
-                                        .trim()
-                                        .to_string();
+                                    side = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
                                 }
                             }
-                            if !name.is_empty() {
-                                let display_filename = format!("{}/{}", category, filename);
-                                let toml_path_str = format!("{}/{}", category, path.file_name().unwrap_or_default().to_string_lossy());
+                            if !mod_name.is_empty() {
+                                let toml_path_str = format!("{}/{}", category, name);
+                                let final_filename = format!("{}/{}", category, mod_filename);
                                 files_list.push(protocol::PackwizMod {
-                                    name,
-                                    filename: display_filename,
-                                    toml_path: toml_path_str, // <-- NUEVA LÍNEA
+                                    name: mod_name,
+                                    filename: final_filename,
+                                    toml_path: toml_path_str,
                                     side,
                                 });
                             }
                         }
+                    } else if ext == "jar" || ext == "zip" {
+                        // Es un archivo RAW (Custom Mod)
+                        let side = index_sides.get(&display_filename).cloned().unwrap_or_else(|| "both".to_string());
+                        files_list.push(protocol::PackwizMod {
+                            name: name.clone(),
+                            filename: display_filename.clone(),
+                            toml_path: display_filename, // Usamos la ruta del archivo mismo
+                            side,
+                        });
                     }
                 }
             }
         }
+
+
+        let mut referenced_jars = std::collections::HashSet::new();
+        for m in &files_list {
+            if m.toml_path.ends_with(".toml") {
+                referenced_jars.insert(m.filename.clone());
+            }
+        }
+        files_list.retain(|m| m.toml_path.ends_with(".toml") || !referenced_jars.contains(&m.filename));
 
         files_list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
         let _ = tx_clone.send(ServerEvent::PackwizModsList {
@@ -827,58 +826,6 @@ pub(crate) async fn sync_to_server(
     });
 }
 
-const CLIENT_ONLY_FILENAMES: &[&str] = &[
-    "options.txt",
-    "optionsof.txt",
-    "optionsshaders.txt",
-    "servers.dat",
-    "servers.dat_old",
-    "usercache.json",
-    "usernamecache.json",
-    "hotbar.nbt",
-    "realms_persistence.json",
-];
-
-fn is_client_only_category(folder: &str) -> bool {
-    let top = folder.split('/').next().unwrap_or(folder).to_lowercase();
-    matches!(top.as_str(), "resourcepacks" | "shaderpacks")
-}
-
-fn is_client_only_file(folder: &str, filename: &str) -> bool {
-    if is_client_only_category(folder) {
-        return true;
-    }
-    let name_lower = filename.to_lowercase();
-    CLIENT_ONLY_FILENAMES.contains(&name_lower.as_str())
-}
-
-async fn force_side_client(pack_base: &std::path::Path, relative_file_path: &str) {
-    let toml_path = pack_base.join(std::path::Path::new(relative_file_path).with_extension("toml"));
-
-    let Ok(content) = tokio::fs::read_to_string(&toml_path).await else {
-        return;
-    };
-
-    let mut found = false;
-    let mut new_lines: Vec<String> = content
-        .lines()
-        .map(|line| {
-            if line.trim_start().starts_with("side") {
-                found = true;
-                "side = \"client\"".to_string()
-            } else {
-                line.to_string()
-            }
-        })
-        .collect();
-
-    if !found {
-        new_lines.push("side = \"client\"".to_string());
-    }
-
-    let _ = tokio::fs::write(&toml_path, new_lines.join("\n") + "\n").await;
-}
-
 pub(crate) async fn change_mod_side(
     state: &AppState,
     tx: &mpsc::UnboundedSender<ServerEvent>,
@@ -890,42 +837,76 @@ pub(crate) async fn change_mod_side(
     let root_clone = state.root.clone();
     tokio::spawn(async move {
         let packwiz_dir = root_clone.join(&id).join("packwiz");
-        let full_path = match crate::api::utils::safe_join(&packwiz_dir, &toml_path) {
-            Ok(p) => p,
-            Err(e) => {
-                let _ = tx_clone.send(ServerEvent::Error { message: e });
-                return;
+        
+        if toml_path.ends_with(".toml") {
+            // Mod Oficial: Editamos su archivo .toml
+            let full_path = match crate::api::utils::safe_join(&packwiz_dir, &toml_path) {
+                Ok(p) => p,
+                Err(e) => { let _ = tx_clone.send(ServerEvent::Error { message: e }); return; }
+            };
+
+            if let Ok(content) = tokio::fs::read_to_string(&full_path).await {
+                let mut found = false;
+                let mut new_lines: Vec<String> = content.lines().map(|line| {
+                    if line.trim_start().starts_with("side =") {
+                        found = true;
+                        format!("side = \"{}\"", side)
+                    } else {
+                        line.to_string()
+                    }
+                }).collect();
+
+                if !found { new_lines.push(format!("side = \"{}\"", side)); }
+
+                let _ = tokio::fs::write(&full_path, new_lines.join("\n") + "\n").await;
             }
-        };
+        } else {
+            // Mod Custom (.jar): Editamos el index.toml
+            let index_path = packwiz_dir.join("index.toml");
+            if let Ok(content) = tokio::fs::read_to_string(&index_path).await {
+                let mut new_content = String::new();
+                let mut in_target_file = false;
+                let mut added_meta = false;
+                
+                for line in content.lines() {
+                    if line.trim().starts_with("file =") {
+                        let f = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                        if f == toml_path {
+                            in_target_file = true;
+                            added_meta = false;
+                        } else {
+                            in_target_file = false;
+                        }
+                    }
+                    
+                    if in_target_file && line.trim().starts_with("meta.side =") {
+                        if side == "both" { continue; } // Si es both, borramos la regla
+                        else {
+                            new_content.push_str(&format!("meta.side = \"{}\"\n", side));
+                            added_meta = true;
+                            continue;
+                        }
+                    }
+                    
+                    if in_target_file && line.trim().starts_with("[[files]]") {
+                        if !added_meta && side != "both" {
+                            new_content.push_str(&format!("meta.side = \"{}\"\n", side));
+                        }
+                        in_target_file = false;
+                    }
 
-        let Ok(content) = tokio::fs::read_to_string(&full_path).await else {
-            let _ = tx_clone.send(ServerEvent::Error { message: "No pude leer el archivo toml del mod.".into() });
-            return;
-        };
-
-        let mut found = false;
-        let mut new_lines: Vec<String> = content
-            .lines()
-            .map(|line| {
-                if line.trim_start().starts_with("side =") {
-                    found = true;
-                    format!("side = \"{}\"", side)
-                } else {
-                    line.to_string()
+                    new_content.push_str(line);
+                    new_content.push('\n');
                 }
-            })
-            .collect();
+                if in_target_file && !added_meta && side != "both" {
+                    new_content.push_str(&format!("meta.side = \"{}\"\n", side));
+                }
 
-        if !found {
-            new_lines.push(format!("side = \"{}\"", side));
+                let _ = tokio::fs::write(&index_path, new_content).await;
+            }
         }
 
-        if let Err(e) = tokio::fs::write(&full_path, new_lines.join("\n") + "\n").await {
-            let _ = tx_clone.send(ServerEvent::Error { message: format!("No pude guardar el archivo: {e}") });
-            return;
-        }
-
-
+        // Refrescar packwiz para que aplique los cambios
         let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
         let _ = tokio::process::Command::new(&packwiz_bin)
             .arg("refresh")
@@ -935,8 +916,10 @@ pub(crate) async fn change_mod_side(
 
         let _ = tx_clone.send(ServerEvent::PackwizLog {
             id: id.clone(),
-            line: format!("✅ Lado cambiado a '{}' para el mod.", side),
+            line: format!("✅ Lado cambiado a '{}' para {}.", side, toml_path),
         });
+        
+        // Esto le dice al frontend que recargue la lista automáticamente
         let _ = tx_clone.send(ServerEvent::Ack { ok: true, message: None });
     });
 }
