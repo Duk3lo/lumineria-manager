@@ -115,6 +115,11 @@ pub async fn upload_mod_packwiz(state: tauri::State<'_, AppState>, id: String, f
     send(&state, ClientRequest::UploadModPackwiz { id, filename, data_base64, folder, scope }).await
 }
 
+#[tauri::command]
+pub async fn change_packwiz_mod_side(state: tauri::State<'_, AppState>, id: String, toml_path: String, side: String) -> Result<(), String> {
+    send(&state, ClientRequest::ChangePackwizModSide { id, toml_path, side }).await
+}
+
 
 #[tauri::command]
 pub async fn list_velocity_plugins(state: tauri::State<'_, AppState>, id: String) -> Result<(), String> {

@@ -130,5 +130,8 @@ pub(crate) async fn handle_request(
             domain,
         } => settings::set_publish_config(state, tx, ssh_host, remote_base, domain).await,
         ClientRequest::GetPublishConfig => settings::get_publish_config(state, tx).await,
+        ClientRequest::ChangePackwizModSide { id, toml_path, side } => {
+            packwiz::change_mod_side(state, tx, id, toml_path, side).await
+        }
     }
 }

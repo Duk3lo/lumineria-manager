@@ -58,6 +58,7 @@ pub fn run() {
             commands::servers::upload_server_icon,
             commands::servers::set_publish_config_remote,
             commands::servers::get_publish_config_remote,
+            commands::servers::change_packwiz_mod_side,
             // --- Versions ---
             commands::versions::fetch_neoforge_versions,
             commands::versions::fetch_forge_versions,

@@ -162,6 +162,11 @@ export async function getPublishConfigRemote() {
     await invoke('get_publish_config_remote');
 }
 
+export async function changePackwizModSide(id, tomlPath, side) {
+    updateStatus("Cambiando lado del mod...", "#f9e2af");
+    await invoke('change_packwiz_mod_side', { id, tomlPath, side });
+}
+
 window.sendAction = sendAction;
 window.confirmDelete = confirmDelete;
 window.openServerFolder = openServerFolder;

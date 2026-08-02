@@ -19,37 +19,42 @@ pub(crate) async fn list_servers(state: &AppState, tx: &mpsc::UnboundedSender<Se
 
 
 pub(crate) async fn stop_server(tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
-    run_action(tx, &id, podman::container_action("stop", &id).await);
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        run_action(&tx, &id, podman::container_action("stop", &id).await);
+    });
 }
 
 pub(crate) async fn sync_mods(tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
-    run_action(tx, &id, podman::sync_mods_now(&id).await);
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        run_action(&tx, &id, podman::sync_mods_now(&id).await);
+    });
 }
 
 pub(crate) async fn start_stack(state: &AppState, tx: &mpsc::UnboundedSender<ServerEvent>) {
-    run_action(
-        tx,
-        "stack",
-        podman::run_stack_script(&state.root, "start-podman.sh").await,
-    );
+    let tx = tx.clone();
+    let root = state.root.clone();
+    tokio::spawn(async move {
+        run_action(&tx, "stack", podman::run_stack_script(&root, "start-podman.sh").await);
+    });
 }
 
 pub(crate) async fn stop_stack(state: &AppState, tx: &mpsc::UnboundedSender<ServerEvent>) {
-    run_action(
-        tx,
-        "stack",
-        podman::run_stack_script(&state.root, "stop-podman.sh").await,
-    );
+    let tx = tx.clone();
+    let root = state.root.clone();
+    tokio::spawn(async move {
+        run_action(&tx, "stack", podman::run_stack_script(&root, "stop-podman.sh").await);
+    });
 }
 
 pub(crate) async fn restart_stack(state: &AppState, tx: &mpsc::UnboundedSender<ServerEvent>) {
-    run_action(
-        tx,
-        "stack",
-        podman::run_stack_script(&state.root, "restart-podman.sh").await,
-    );
+    let tx = tx.clone();
+    let root = state.root.clone();
+    tokio::spawn(async move {
+        run_action(&tx, "stack", podman::run_stack_script(&root, "restart-podman.sh").await);
+    });
 }
-
 
 async fn read_server_type(root: &std::path::Path, id: &str) -> Option<String> {
     let data = tokio::fs::read_to_string(root.join(id).join("server.env")).await.ok()?;
@@ -59,34 +64,42 @@ async fn read_server_type(root: &std::path::Path, id: &str) -> Option<String> {
 }
 
 pub(crate) async fn start_server(state: &AppState, tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
-    if let Some(server_type) = read_server_type(&state.root, &id).await {
-        if server_type == "velocity" {
-            patch_velocity_config(&state.root, &id, tx).await;
-        }
-        if crate::installer::plugin_downloader::uses_direct_plugins(&server_type) {
-            let dest_dir = state.root.join(&id);
-            if let Err(e) = crate::installer::plugin_downloader::sync_plugins(&server_type, &dest_dir, &id, tx).await {
-                let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("⚠️ No pude sincronizar plugins antes de arrancar: {e}") });
+    let tx = tx.clone();
+    let root = state.root.clone();
+    tokio::spawn(async move {
+        if let Some(server_type) = read_server_type(&root, &id).await {
+            if server_type == "velocity" {
+                patch_velocity_config(&root, &id, &tx).await;
+            }
+            if crate::installer::plugin_downloader::uses_direct_plugins(&server_type) {
+                let dest_dir = root.join(&id);
+                if let Err(e) = crate::installer::plugin_downloader::sync_plugins(&server_type, &dest_dir, &id, &tx).await {
+                    let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("⚠️ No pude sincronizar plugins antes de arrancar: {e}") });
+                }
             }
         }
-    }
-    run_action(tx, &id, podman::container_action("start", &id).await);
+        run_action(&tx, &id, podman::container_action("start", &id).await);
+    });
 }
 
 
 pub(crate) async fn restart_server(state: &AppState, tx: &mpsc::UnboundedSender<ServerEvent>, id: String) {
-    if let Some(server_type) = read_server_type(&state.root, &id).await {
-        if server_type == "velocity" {
-            patch_velocity_config(&state.root, &id, tx).await;
-        }
-        if crate::installer::plugin_downloader::uses_direct_plugins(&server_type) {
-            let dest_dir = state.root.join(&id);
-            if let Err(e) = crate::installer::plugin_downloader::sync_plugins(&server_type, &dest_dir, &id, tx).await {
-                let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("⚠️ No pude sincronizar plugins antes de reiniciar: {e}") });
+    let tx = tx.clone();
+    let root = state.root.clone();
+    tokio::spawn(async move {
+        if let Some(server_type) = read_server_type(&root, &id).await {
+            if server_type == "velocity" {
+                patch_velocity_config(&root, &id, &tx).await;
+            }
+            if crate::installer::plugin_downloader::uses_direct_plugins(&server_type) {
+                let dest_dir = root.join(&id);
+                if let Err(e) = crate::installer::plugin_downloader::sync_plugins(&server_type, &dest_dir, &id, &tx).await {
+                    let _ = tx.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("⚠️ No pude sincronizar plugins antes de reiniciar: {e}") });
+                }
             }
         }
-    }
-    run_action(tx, &id, podman::container_action("restart", &id).await);
+        run_action(&tx, &id, podman::container_action("restart", &id).await);
+    });
 }
 
 async fn patch_velocity_config(root: &std::path::Path, id: &str, tx: &mpsc::UnboundedSender<ServerEvent>) {

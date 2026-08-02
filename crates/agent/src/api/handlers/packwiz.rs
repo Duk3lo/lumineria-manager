@@ -322,12 +322,14 @@ pub(crate) async fn upload_mod(
                     } else {
                         format!("{}/{}", folder, filename)
                     };
+                    
                     let out = tokio::process::Command::new(&packwiz_bin)
-                        .arg("add")
-                        .arg(&relative_file_path)
+                        .arg("refresh")
+
                         .current_dir(&base)
                         .output()
                         .await;
+                        
                     if let Ok(o) = out {
                         let log_out = String::from_utf8_lossy(&o.stdout);
                         if !log_out.is_empty() {
@@ -699,9 +701,11 @@ pub(crate) async fn list_mods(
                             }
                             if !name.is_empty() {
                                 let display_filename = format!("{}/{}", category, filename);
+                                let toml_path_str = format!("{}/{}", category, path.file_name().unwrap_or_default().to_string_lossy());
                                 files_list.push(protocol::PackwizMod {
                                     name,
                                     filename: display_filename,
+                                    toml_path: toml_path_str, // <-- NUEVA LÍNEA
                                     side,
                                 });
                             }
@@ -873,4 +877,66 @@ async fn force_side_client(pack_base: &std::path::Path, relative_file_path: &str
     }
 
     let _ = tokio::fs::write(&toml_path, new_lines.join("\n") + "\n").await;
+}
+
+pub(crate) async fn change_mod_side(
+    state: &AppState,
+    tx: &mpsc::UnboundedSender<ServerEvent>,
+    id: String,
+    toml_path: String,
+    side: String,
+) {
+    let tx_clone = tx.clone();
+    let root_clone = state.root.clone();
+    tokio::spawn(async move {
+        let packwiz_dir = root_clone.join(&id).join("packwiz");
+        let full_path = match crate::api::utils::safe_join(&packwiz_dir, &toml_path) {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = tx_clone.send(ServerEvent::Error { message: e });
+                return;
+            }
+        };
+
+        let Ok(content) = tokio::fs::read_to_string(&full_path).await else {
+            let _ = tx_clone.send(ServerEvent::Error { message: "No pude leer el archivo toml del mod.".into() });
+            return;
+        };
+
+        let mut found = false;
+        let mut new_lines: Vec<String> = content
+            .lines()
+            .map(|line| {
+                if line.trim_start().starts_with("side =") {
+                    found = true;
+                    format!("side = \"{}\"", side)
+                } else {
+                    line.to_string()
+                }
+            })
+            .collect();
+
+        if !found {
+            new_lines.push(format!("side = \"{}\"", side));
+        }
+
+        if let Err(e) = tokio::fs::write(&full_path, new_lines.join("\n") + "\n").await {
+            let _ = tx_clone.send(ServerEvent::Error { message: format!("No pude guardar el archivo: {e}") });
+            return;
+        }
+
+
+        let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
+        let _ = tokio::process::Command::new(&packwiz_bin)
+            .arg("refresh")
+            .current_dir(&packwiz_dir)
+            .output()
+            .await;
+
+        let _ = tx_clone.send(ServerEvent::PackwizLog {
+            id: id.clone(),
+            line: format!("✅ Lado cambiado a '{}' para el mod.", side),
+        });
+        let _ = tx_clone.send(ServerEvent::Ack { ok: true, message: None });
+    });
 }

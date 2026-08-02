@@ -146,15 +146,15 @@
                     <div id="tab-packwiz" class="tab-pane hidden">
 
                         <!-- GESTIÓN DE MODS -->
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                        <!-- GESTIÓN DE MODS -->
+                        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 20px;">
 
                             <!-- AÑADIR MOD (MODRINTH / CF) -->
                             <div style="background: #313244; padding: 20px; border-radius: 8px;">
-                                <h3 style="margin-top:0; color: #a6e3a1;">➕ Buscar / Añadir Mod</h3>
-                                <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 10px;">URL o Nombre en
-                                    Modrinth/CurseForge</p>
+                                <h3 style="margin-top:0; color: #a6e3a1;">➕ Buscar / Añadir</h3>
+                                <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 10px;">URL o Nombre</p>
                                 <div style="display: flex; gap: 10px;">
-                                    <input type="text" id="pw-add-input" placeholder="Ej: sodium o https://..."
+                                    <input type="text" id="pw-add-input" placeholder="Ej: sodium"
                                         style="flex: 1; padding: 8px;">
                                     <button id="btn-pw-add" class="primary-btn"
                                         style="background: #a6e3a1; color: #11111b;">Añadir</button>
@@ -163,14 +163,26 @@
 
                             <!-- ELIMINAR MOD -->
                             <div style="background: #313244; padding: 20px; border-radius: 8px;">
-                                <h3 style="margin-top:0; color: #f38ba8;">🗑️ Eliminar Mod</h3>
-                                <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 10px;">Nombre exacto del mod
-                                    a quitar</p>
+                                <h3 style="margin-top:0; color: #f38ba8;">🗑️ Eliminar</h3>
+                                <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 10px;">Nombre exacto</p>
                                 <div style="display: flex; gap: 10px;">
                                     <input type="text" id="pw-remove-input" placeholder="Ej: sodium"
                                         style="flex: 1; padding: 8px;">
                                     <button id="btn-pw-remove" class="primary-btn"
                                         style="background: #f38ba8; color: #11111b;">Eliminar</button>
+                                </div>
+                            </div>
+
+                            <!-- AÑADIR MOD CUSTOM (NUEVO) -->
+                            <div style="background: #313244; padding: 20px; border-radius: 8px;">
+                                <h3 style="margin-top:0; color: #f9e2af;">⬆️ Subir Custom</h3>
+                                <p style="color: #cdd6f4; font-size: 0.85em; margin-bottom: 10px;">Sube un .jar manual
+                                </p>
+                                <div style="display: flex; gap: 10px;">
+                                    <input type="file" id="pw-upload-custom" accept=".jar,.zip"
+                                        style="flex: 1; padding: 8px; color: #cdd6f4; background: #1e1e2e; border: 1px solid #45475a; border-radius: 4px;">
+                                    <button id="btn-pw-upload-custom" class="primary-btn"
+                                        style="background: #f9e2af; color: #11111b;">Subir</button>
                                 </div>
                             </div>
                         </div>

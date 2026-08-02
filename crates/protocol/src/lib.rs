@@ -211,6 +211,11 @@ pub enum ClientRequest {
     ListPackwizMods {
         id: String,
     },
+    ChangePackwizModSide {
+        id: String,
+        toml_path: String,
+        side: String,
+    },
     AutoUpdateServer {
         id: String,
     },
@@ -280,5 +285,6 @@ pub enum ServerEvent {
 pub struct PackwizMod {
     pub name: String,
     pub filename: String,
+    pub toml_path: String,
     pub side: String,
 }

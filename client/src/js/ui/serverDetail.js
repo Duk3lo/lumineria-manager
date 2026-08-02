@@ -4,7 +4,7 @@ import {
     listPackwizMods, unpublishModpack, sendConsoleCommand, listPackwizFiles,
     readFile, writeFile, deleteFile, createDirectory, updateAllServer,
     listVelocityPlugins, addVelocityPlugin, removeVelocityPlugin, setVelocityMcVersionHint, syncVelocityPluginsNow,
-    setMotd, setPort, uploadServerIcon
+    setMotd, setPort, uploadServerIcon, invoke_ws_action, changePackwizModSide,
 } from '../features/actions.js';
 import { openLogs, closeLogs } from '../features/logs.js';
 import { appendLine } from '../features/logs.js';
@@ -483,7 +483,24 @@ export function initServerDetail() {
         }, '⏳ Sincronizando...');
     }
 
-
+    const btnUploadCustom = document.getElementById('btn-pw-upload-custom');
+    if (btnUploadCustom) {
+        withGuard(btnUploadCustom, async () => {
+            const fileInput = document.getElementById('pw-upload-custom');
+            if (!fileInput || fileInput.files.length === 0) return alert("Selecciona un archivo .jar");
+            const file = fileInput.files[0];
+            await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = async () => {
+                    const base64 = reader.result.split(',')[1];
+                    await uploadMod(currentServerId, file.name, base64, "mods", "packwiz");
+                    resolve();
+                };
+                reader.readAsDataURL(file);
+            });
+            fileInput.value = "";
+        }, '⏳ Subiendo...');
+    }
 
     const btnRefreshTree = document.getElementById('btn-pw-refresh-tree');
     if (btnRefreshTree) btnRefreshTree.onclick = () => listPackwizFiles(currentServerId);
@@ -614,6 +631,7 @@ export function updateDetailStatus(status) {
 }
 
 // RENDERIZAR TODO LO QUE TIENE PACKWIZ (Mods, Resourcepacks, Shaders, Configs)
+// RENDERIZAR TODO LO QUE TIENE PACKWIZ (Mods, Resourcepacks, Shaders, Configs)
 export function renderPackwizMods(mods) {
     const container = document.getElementById('pw-mods-list-container');
     if (!container) return;
@@ -634,27 +652,28 @@ export function renderPackwizMods(mods) {
             </thead>
             <tbody>
                 ${mods.map(mod => {
-        let sideBadge = "";
-        if (mod.side === "client") {
-            sideBadge = `<span class="badge" style="background: #89b4fa; color: #11111b; font-weight: bold; font-size:0.75rem; padding: 2px 6px; border-radius:4px;">Solo Cliente</span>`;
-        } else if (mod.side === "server") {
-            sideBadge = `<span class="badge" style="background: #f9e2af; color: #11111b; font-weight: bold; font-size:0.75rem; padding: 2px 6px; border-radius:4px;">Solo Servidor</span>`;
-        } else {
-            sideBadge = `<span class="badge" style="background: #a6e3a1; color: #11111b; font-weight: bold; font-size:0.75rem; padding: 2px 6px; border-radius:4px;">Ambos</span>`;
-        }
+                    
+                    // NUEVO SELECTOR DESPLEGABLE PARA EL LADO DEL MOD
+                    let sideBadge = `
+                        <select class="mod-side-select" data-toml="${escapeHtml(mod.toml_path)}" style="background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 4px; font-size: 0.8rem; cursor: pointer;">
+                            <option value="both" ${mod.side === 'both' || !mod.side ? 'selected' : ''}>Ambos</option>
+                            <option value="client" ${mod.side === 'client' ? 'selected' : ''}>Solo Cliente</option>
+                            <option value="server" ${mod.side === 'server' ? 'selected' : ''}>Solo Servidor</option>
+                        </select>
+                    `;
 
-        let typeBadge = `<span style="color: #cba6f7;">📦 Mod</span>`;
-        if (mod.filename.includes("resourcepacks/")) {
-            typeBadge = `<span style="color: #fab387;">🎨 Texturas</span>`;
-        } else if (mod.filename.includes("config/")) {
-            typeBadge = `<span style="color: #94e2d5;">⚙️ Config</span>`;
-        } else if (mod.filename.includes("shaderpacks/")) {
-            typeBadge = `<span style="color: #f9e2af;">🔮 Shader</span>`;
-        } else if (mod.filename.includes("plugins/")) {
-            typeBadge = `<span style="color: #89b4fa;">🔌 Plugin</span>`;
-        }
+                    let typeBadge = `<span style="color: #cba6f7;">📦 Mod</span>`;
+                    if (mod.filename.includes("resourcepacks/")) {
+                        typeBadge = `<span style="color: #fab387;">🎨 Texturas</span>`;
+                    } else if (mod.filename.includes("config/")) {
+                        typeBadge = `<span style="color: #94e2d5;">⚙️ Config</span>`;
+                    } else if (mod.filename.includes("shaderpacks/")) {
+                        typeBadge = `<span style="color: #f9e2af;">🔮 Shader</span>`;
+                    } else if (mod.filename.includes("plugins/")) {
+                        typeBadge = `<span style="color: #89b4fa;">🔌 Plugin</span>`;
+                    }
 
-        return `
+                    return `
                         <tr style="border-bottom: 1px solid #313244;">
                             <td style="padding: 8px; font-weight: bold;">${typeBadge}</td>
                             <td style="padding: 8px; color: #cdd6f4;">
@@ -664,10 +683,27 @@ export function renderPackwizMods(mods) {
                             <td style="padding: 8px; text-align: right;">${sideBadge}</td>
                         </tr>
                     `;
-    }).join('')}
+                }).join('')}
             </tbody>
         </table>
     `;
+
+    // AGREGAR EVENT LISTENERS DESPUÉS DE INYECTAR EL HTML
+    container.querySelectorAll('.mod-side-select').forEach(select => {
+        select.addEventListener('change', async (e) => {
+            const tomlPath = e.target.getAttribute('data-toml');
+            const newSide = e.target.value;
+            e.target.disabled = true; // deshabilitar el select mientras se procesa el cambio
+            
+            try {
+                await changePackwizModSide(currentServerId, tomlPath, newSide);
+                // Si tienes éxito, el agente refrescará la lista automáticamente enviando el evento
+            } catch (err) {
+                alert("Error al cambiar de lado: " + err);
+                e.target.disabled = false; // rehabilitar si falla
+            }
+        });
+    });
 }
 
 
