@@ -45,6 +45,7 @@ pub fn run() {
             commands::servers::read_packwiz_file,
             commands::servers::write_packwiz_file,
             commands::servers::delete_packwiz_file,
+            commands::servers::move_packwiz_file,
             commands::servers::create_packwiz_directory,
             commands::servers::update_server,
             commands::servers::sync_pack_to_server,

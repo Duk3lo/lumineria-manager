@@ -139,6 +139,12 @@ pub enum ClientRequest {
         content: String,
         scope: FileScope,
     },
+    MoveFile {
+        id: String,
+        from: String,
+        to: String,
+        scope: FileScope,
+    },
     DeleteFile {
         id: String,
         path: String,
@@ -187,6 +193,7 @@ pub enum ClientRequest {
     AddModPackwiz {
         id: String,
         query: String,
+        category: String,
     },
     RemoveModPackwiz {
         id: String,
@@ -287,4 +294,5 @@ pub struct PackwizMod {
     pub filename: String,
     pub toml_path: String,
     pub side: String,
+    pub category: String,
 }

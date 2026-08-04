@@ -61,8 +61,13 @@ pub async fn unsubscribe_logs(state: State<'_, AppState>, id: String) -> Result<
 }
 
 #[tauri::command]
-pub async fn add_mod_packwiz(state: tauri::State<'_, AppState>, id: String, query: String) -> Result<(), String> {
-    send(&state, ClientRequest::AddModPackwiz { id, query }).await
+pub async fn add_mod_packwiz(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    query: String,
+    category: String,
+) -> Result<(), String> {
+    send(&state, ClientRequest::AddModPackwiz { id, query, category }).await
 }
 
 #[tauri::command]
@@ -88,6 +93,17 @@ pub async fn unpublish_packwiz(state: tauri::State<'_, AppState>, id: String, pa
 #[tauri::command]
 pub async fn list_packwiz_files(state: tauri::State<'_, AppState>, id: String, scope: protocol::FileScope) -> Result<(), String> {
     send(&state, ClientRequest::ListPackwizFiles { id, scope }).await
+}
+
+#[tauri::command]
+pub async fn move_packwiz_file(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    from: String,
+    to: String,
+    scope: protocol::FileScope,
+) -> Result<(), String> {
+    send(&state, ClientRequest::MoveFile { id, from, to, scope }).await
 }
 
 #[tauri::command]

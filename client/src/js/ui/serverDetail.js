@@ -455,12 +455,62 @@ export function initServerDetail() {
         };
     }
 
+    const categorySelect = document.getElementById('pw-add-category');
+    const categoryCustomInput = document.getElementById('pw-add-category-custom');
+    if (categorySelect && categoryCustomInput) {
+        categorySelect.addEventListener('change', () => {
+            categoryCustomInput.classList.toggle('hidden', categorySelect.value !== 'custom');
+        });
+    }
+
+    const uploadCategorySelect = document.getElementById('pw-upload-custom-category');
+    const uploadCategoryCustomInput = document.getElementById('pw-upload-custom-category-custom');
+    if (uploadCategorySelect && uploadCategoryCustomInput) {
+        uploadCategorySelect.addEventListener('change', () => {
+            uploadCategoryCustomInput.classList.toggle('hidden', uploadCategorySelect.value !== 'custom');
+        });
+    }
+
     const btnAdd = document.getElementById('btn-pw-add');
     if (btnAdd) {
         withGuard(btnAdd, async () => {
             const query = document.getElementById('pw-add-input').value.trim();
-            if (query) await addMod(currentServerId, query);
+            if (!query) return;
+            let category = categorySelect ? categorySelect.value : 'auto';
+            if (category === 'custom') {
+                const custom = categoryCustomInput ? categoryCustomInput.value.trim() : '';
+                if (!custom) return alert("Escribe el nombre de la carpeta personalizada.");
+                category = custom;
+            }
+            await addMod(currentServerId, query, category);
         }, '⏳ Añadiendo...');
+    }
+
+    const btnUploadCustom = document.getElementById('btn-pw-upload-custom');
+    if (btnUploadCustom) {
+        withGuard(btnUploadCustom, async () => {
+            const fileInput = document.getElementById('pw-upload-custom');
+            if (!fileInput || fileInput.files.length === 0) return alert("Selecciona un archivo .jar/.zip");
+            const file = fileInput.files[0];
+
+            let folder = uploadCategorySelect ? uploadCategorySelect.value : 'mods';
+            if (folder === 'custom') {
+                const custom = uploadCategoryCustomInput ? uploadCategoryCustomInput.value.trim() : '';
+                if (!custom) return alert("Escribe el nombre de la carpeta personalizada.");
+                folder = custom;
+            }
+
+            await new Promise((resolve) => {
+                const reader = new FileReader();
+                reader.onload = async () => {
+                    const base64 = reader.result.split(',')[1];
+                    await uploadMod(currentServerId, file.name, base64, folder, "packwiz");
+                    resolve();
+                };
+                reader.readAsDataURL(file);
+            });
+            fileInput.value = "";
+        }, '⏳ Subiendo...');
     }
 
     const btnRemove = document.getElementById('btn-pw-remove');
@@ -481,25 +531,6 @@ export function initServerDetail() {
             if (!ok) return;
             await syncPackToServer(currentServerId);
         }, '⏳ Sincronizando...');
-    }
-
-    const btnUploadCustom = document.getElementById('btn-pw-upload-custom');
-    if (btnUploadCustom) {
-        withGuard(btnUploadCustom, async () => {
-            const fileInput = document.getElementById('pw-upload-custom');
-            if (!fileInput || fileInput.files.length === 0) return alert("Selecciona un archivo .jar");
-            const file = fileInput.files[0];
-            await new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = async () => {
-                    const base64 = reader.result.split(',')[1];
-                    await uploadMod(currentServerId, file.name, base64, "mods", "packwiz");
-                    resolve();
-                };
-                reader.readAsDataURL(file);
-            });
-            fileInput.value = "";
-        }, '⏳ Subiendo...');
     }
 
     const btnRefreshTree = document.getElementById('btn-pw-refresh-tree');
@@ -630,14 +661,49 @@ export function updateDetailStatus(status) {
     statusTextEl.innerText = labels[status] || status;
 }
 
-// RENDERIZAR TODO LO QUE TIENE PACKWIZ (Mods, Resourcepacks, Shaders, Configs)
-// RENDERIZAR TODO LO QUE TIENE PACKWIZ (Mods, Resourcepacks, Shaders, Configs)
+const CATEGORY_META = {
+    mods: { icon: '📦', label: 'Mods', color: '#cba6f7' },
+    resourcepacks: { icon: '🎨', label: 'Texturas', color: '#fab387' },
+    shaderpacks: { icon: '🔮', label: 'Shaders', color: '#f9e2af' },
+    config: { icon: '⚙️', label: 'Config', color: '#94e2d5' },
+    plugins: { icon: '🔌', label: 'Plugins', color: '#89b4fa' },
+    root: { icon: '📄', label: 'Raíz', color: '#cdd6f4' },
+};
+function categoryMeta(category) {
+    return CATEGORY_META[category] || { icon: '📁', label: category, color: '#a6adc8' };
+}
+let pwActiveFilter = 'all';
+
 export function renderPackwizMods(mods) {
     const container = document.getElementById('pw-mods-list-container');
+    const filterBar = document.getElementById('pw-category-filters');
     if (!container) return;
 
-    if (mods.length === 0) {
+    if (!mods || mods.length === 0) {
+        if (filterBar) filterBar.innerHTML = '';
         container.innerHTML = `<p style="color: #6c7086; text-align: center; margin: 20px 0;">No hay archivos en este pack todavía. ¡Prueba agregando uno!</p>`;
+        return;
+    }
+
+    if (filterBar) {
+        const categories = [...new Set(mods.map(m => m.category))].sort();
+        if (pwActiveFilter !== 'all' && !categories.includes(pwActiveFilter)) pwActiveFilter = 'all';
+        const pills = [`<button class="secondary-btn pw-filter-pill" data-cat="all" style="padding:4px 12px; font-size:0.8em; ${pwActiveFilter === 'all' ? 'background:#a6e3a1;color:#11111b;' : ''}">Todos (${mods.length})</button>`];
+        for (const cat of categories) {
+            const meta = categoryMeta(cat);
+            const count = mods.filter(m => m.category === cat).length;
+            const active = pwActiveFilter === cat;
+            pills.push(`<button class="secondary-btn pw-filter-pill" data-cat="${escapeHtml(cat)}" style="padding:4px 12px; font-size:0.8em; ${active ? `background:${meta.color};color:#11111b;` : ''}">${meta.icon} ${escapeHtml(meta.label)} (${count})</button>`);
+        }
+        filterBar.innerHTML = pills.join('');
+        filterBar.querySelectorAll('.pw-filter-pill').forEach(btn => {
+            btn.onclick = () => { pwActiveFilter = btn.dataset.cat; renderPackwizMods(mods); };
+        });
+    }
+
+    const visible = pwActiveFilter === 'all' ? mods : mods.filter(m => m.category === pwActiveFilter);
+    if (visible.length === 0) {
+        container.innerHTML = `<p style="color: #6c7086; text-align: center; margin: 20px 0;">Nada en esta categoría todavía.</p>`;
         return;
     }
 
@@ -651,29 +717,17 @@ export function renderPackwizMods(mods) {
                 </tr>
             </thead>
             <tbody>
-                ${mods.map(mod => {
-                    
-                    // NUEVO SELECTOR DESPLEGABLE PARA EL LADO DEL MOD
-                    let sideBadge = `
+                ${visible.map(mod => {
+        const sideBadge = `
                         <select class="mod-side-select" data-toml="${escapeHtml(mod.toml_path)}" style="background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 4px; font-size: 0.8rem; cursor: pointer;">
                             <option value="both" ${mod.side === 'both' || !mod.side ? 'selected' : ''}>Ambos</option>
                             <option value="client" ${mod.side === 'client' ? 'selected' : ''}>Solo Cliente</option>
                             <option value="server" ${mod.side === 'server' ? 'selected' : ''}>Solo Servidor</option>
                         </select>
                     `;
-
-                    let typeBadge = `<span style="color: #cba6f7;">📦 Mod</span>`;
-                    if (mod.filename.includes("resourcepacks/")) {
-                        typeBadge = `<span style="color: #fab387;">🎨 Texturas</span>`;
-                    } else if (mod.filename.includes("config/")) {
-                        typeBadge = `<span style="color: #94e2d5;">⚙️ Config</span>`;
-                    } else if (mod.filename.includes("shaderpacks/")) {
-                        typeBadge = `<span style="color: #f9e2af;">🔮 Shader</span>`;
-                    } else if (mod.filename.includes("plugins/")) {
-                        typeBadge = `<span style="color: #89b4fa;">🔌 Plugin</span>`;
-                    }
-
-                    return `
+        const meta = categoryMeta(mod.category);
+        const typeBadge = `<span style="color: ${meta.color};">${meta.icon} ${escapeHtml(meta.label)}</span>`;
+        return `
                         <tr style="border-bottom: 1px solid #313244;">
                             <td style="padding: 8px; font-weight: bold;">${typeBadge}</td>
                             <td style="padding: 8px; color: #cdd6f4;">
@@ -683,24 +737,21 @@ export function renderPackwizMods(mods) {
                             <td style="padding: 8px; text-align: right;">${sideBadge}</td>
                         </tr>
                     `;
-                }).join('')}
+    }).join('')}
             </tbody>
         </table>
     `;
 
-    // AGREGAR EVENT LISTENERS DESPUÉS DE INYECTAR EL HTML
     container.querySelectorAll('.mod-side-select').forEach(select => {
         select.addEventListener('change', async (e) => {
             const tomlPath = e.target.getAttribute('data-toml');
             const newSide = e.target.value;
-            e.target.disabled = true; // deshabilitar el select mientras se procesa el cambio
-            
+            e.target.disabled = true;
             try {
                 await changePackwizModSide(currentServerId, tomlPath, newSide);
-                // Si tienes éxito, el agente refrescará la lista automáticamente enviando el evento
             } catch (err) {
                 alert("Error al cambiar de lado: " + err);
-                e.target.disabled = false; // rehabilitar si falla
+                e.target.disabled = false;
             }
         });
     });

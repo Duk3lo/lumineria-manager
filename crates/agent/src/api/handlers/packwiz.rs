@@ -117,75 +117,112 @@ pub(crate) async fn ensure_packwiz_initialized(
     Ok(())
 }
 
+fn detect_add_source(query: &str) -> (&'static str, Option<String>) {
+    let q = query.trim();
+    if q.contains("curseforge.com") {
+        return ("cf", None);
+    }
+    if q.contains("modrinth.com") || q.contains("cdn.modrinth.com") {
+        return ("modrinth", None);
+    }
+    if q.starts_with("http://") || q.starts_with("https://") {
+        // Link directo que no es de Modrinth/CurseForge -> packwiz url add
+        let raw_name = q
+            .split('/')
+            .last()
+            .unwrap_or("archivo")
+            .split('?')
+            .next()
+            .unwrap_or("archivo")
+            .trim_end_matches(".jar")
+            .trim_end_matches(".zip")
+            .to_string();
+        let name = if raw_name.is_empty() { "archivo".to_string() } else { raw_name };
+        return ("url", Some(name));
+    }
+    ("modrinth", None)
+}
+
+fn resolve_meta_folder(category: &str) -> Option<String> {
+    let c = category.trim();
+    if c.is_empty() || c.eq_ignore_ascii_case("auto") {
+        None
+    } else if c.eq_ignore_ascii_case("root") || c.eq_ignore_ascii_case("raiz") || c == "." {
+        Some(".".to_string())
+    } else {
+        Some(c.to_string())
+    }
+}
+
 pub(crate) async fn add_mod(
     state: &AppState,
     tx: &mpsc::UnboundedSender<ServerEvent>,
     id: String,
     query: String,
+    category: String,
 ) {
     let tx_clone = tx.clone();
     let root_clone = state.root.clone();
     tokio::spawn(async move {
         let dest_dir = root_clone.join(&id);
         let pack_dir = dest_dir.join("packwiz");
-
         let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
 
         if let Err(e) =
             ensure_packwiz_initialized(&dest_dir, &pack_dir, &packwiz_bin, &id, &tx_clone).await
         {
-            let _ = tx_clone.send(ServerEvent::PackwizLog {
-                id: id.clone(),
-                line: format!("❌ {}", e),
-            });
+            let _ = tx_clone.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("❌ {}", e) });
             return;
         }
 
-        let source = if query.contains("curseforge.com") {
-            "cf"
-        } else {
-            "modrinth"
+        let (source, url_name) = detect_add_source(&query);
+        let meta_folder = resolve_meta_folder(&category);
+
+        let source_label = match source {
+            "cf" => "CurseForge",
+            "url" => "link directo",
+            _ => "Modrinth",
         };
         let _ = tx_clone.send(ServerEvent::PackwizLog {
             id: id.clone(),
-            line: format!("> Añadiendo mod '{}'...", query),
+            line: format!("> Añadiendo '{}' ({})...", query, source_label),
         });
 
-        let output = tokio::process::Command::new(&packwiz_bin)
-            .arg(source)
-            .arg("add")
-            .arg(&query)
-            .arg("-y")
-            .current_dir(&pack_dir)
-            .output()
-            .await;
+        let mut cmd = tokio::process::Command::new(&packwiz_bin);
+        cmd.current_dir(&pack_dir);
 
-        match output {
+        if source == "url" {
+            cmd.arg("url").arg("add");
+            cmd.arg(url_name.as_deref().unwrap_or("archivo"));
+            cmd.arg(&query);
+        } else {
+            cmd.arg(source).arg("add").arg(&query);
+        }
+        cmd.arg("-y");
+        if let Some(folder) = &meta_folder {
+            cmd.arg("--meta-folder").arg(folder);
+        }
+
+        match cmd.output().await {
             Ok(out) => {
                 let stdout = String::from_utf8_lossy(&out.stdout);
                 let stderr = String::from_utf8_lossy(&out.stderr);
                 if !stdout.is_empty() {
-                    let _ = tx_clone.send(ServerEvent::PackwizLog {
-                        id: id.clone(),
-                        line: stdout.trim().to_string(),
-                    });
+                    let _ = tx_clone.send(ServerEvent::PackwizLog { id: id.clone(), line: stdout.trim().to_string() });
                 }
                 if !stderr.is_empty() {
-                    let _ = tx_clone.send(ServerEvent::PackwizLog {
-                        id: id.clone(),
-                        line: stderr.trim().to_string(),
-                    });
+                    let _ = tx_clone.send(ServerEvent::PackwizLog { id: id.clone(), line: stderr.trim().to_string() });
                 }
-                let _ = tx_clone.send(ServerEvent::Ack {
-                    ok: true,
-                    message: None,
-                });
+                if !out.status.success() {
+                    let _ = tx_clone.send(ServerEvent::Error {
+                        message: "No se pudo añadir el archivo. Revisá el log de arriba.".into(),
+                    });
+                    return;
+                }
+                let _ = tx_clone.send(ServerEvent::Ack { ok: true, message: None });
             }
             Err(e) => {
-                let _ = tx_clone.send(ServerEvent::PackwizLog {
-                    id: id.clone(),
-                    line: format!("❌ Error: {}", e),
-                });
+                let _ = tx_clone.send(ServerEvent::PackwizLog { id: id.clone(), line: format!("❌ Error: {}", e) });
             }
         }
     });
@@ -668,6 +705,36 @@ pub(crate) async fn unpublish(
 
 
 
+fn category_for_path(rel_path: &str) -> String {
+    match rel_path.split('/').next() {
+        Some(first) if !first.is_empty() => first.to_string(),
+        _ => "root".to_string(),
+    }
+}
+
+fn collect_pack_files<'a>(
+    pack_dir: &'a std::path::Path,
+    rel: String,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Vec<String>> + Send + 'a>> {
+    Box::pin(async move {
+        let mut out = Vec::new();
+        let target = if rel.is_empty() { pack_dir.to_path_buf() } else { pack_dir.join(&rel) };
+        let Ok(mut entries) = tokio::fs::read_dir(&target).await else { return out; };
+        while let Ok(Some(entry)) = entries.next_entry().await {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name == ".git" { continue; }
+            let new_rel = if rel.is_empty() { name.clone() } else { format!("{}/{}", rel, name) };
+            let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
+            if is_dir {
+                out.extend(collect_pack_files(pack_dir, new_rel).await);
+            } else {
+                out.push(new_rel);
+            }
+        }
+        out
+    })
+}
+
 pub(crate) async fn list_mods(
     state: &AppState,
     tx: &mpsc::UnboundedSender<ServerEvent>,
@@ -678,11 +745,8 @@ pub(crate) async fn list_mods(
     tokio::spawn(async move {
         let packwiz_dir = root_clone.join(&id).join("packwiz");
         let index_path = packwiz_dir.join("index.toml");
-        
-        let mut files_list = Vec::new();
+
         let mut index_sides: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        
-        // Leemos index.toml para saber qué lado tienen los .jar custom
         if let Ok(index_content) = tokio::fs::read_to_string(&index_path).await {
             let mut current_file = String::new();
             for line in index_content.lines() {
@@ -699,76 +763,83 @@ pub(crate) async fn list_mods(
             }
         }
 
-        let categories = vec!["mods", "resourcepacks", "shaderpacks", "plugins", "config"];
+        let all_files = collect_pack_files(&packwiz_dir, String::new()).await;
+        let mut files_list = Vec::new();
 
-        for category in categories {
-            let target_dir = packwiz_dir.join(category);
-            if !target_dir.exists() { continue; }
+        // 1) Metadatos .toml
+        for rel_path in &all_files {
+            let lower = rel_path.to_lowercase();
+            if lower == "pack.toml" || lower == "index.toml" { continue; }
+            if std::path::Path::new(rel_path).extension().and_then(|e| e.to_str()) != Some("toml") { continue; }
 
-            if let Ok(mut entries) = tokio::fs::read_dir(&target_dir).await {
-                while let Ok(Some(entry)) = entries.next_entry().await {
-                    let path = entry.path();
-                    let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
-                    let name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
-                    let display_filename = format!("{}/{}", category, name);
+            let full_path = packwiz_dir.join(rel_path);
+            let Ok(content) = tokio::fs::read_to_string(&full_path).await else { continue };
 
-                    if ext == "toml" {
-                        if let Ok(content) = tokio::fs::read_to_string(&path).await {
-                            let mut mod_name = String::new();
-                            let mut mod_filename = String::new();
-                            let mut side = "both".to_string();
-
-                            for line in content.lines() {
-                                let line = line.trim();
-                                if line.starts_with("name =") {
-                                    mod_name = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
-                                }
-                                if line.starts_with("filename =") {
-                                    mod_filename = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
-                                }
-                                if line.starts_with("side =") {
-                                    side = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
-                                }
-                            }
-                            if !mod_name.is_empty() {
-                                let toml_path_str = format!("{}/{}", category, name);
-                                let final_filename = format!("{}/{}", category, mod_filename);
-                                files_list.push(protocol::PackwizMod {
-                                    name: mod_name,
-                                    filename: final_filename,
-                                    toml_path: toml_path_str,
-                                    side,
-                                });
-                            }
-                        }
-                    } else if ext == "jar" || ext == "zip" {
-                        // Es un archivo RAW (Custom Mod)
-                        let side = index_sides.get(&display_filename).cloned().unwrap_or_else(|| "both".to_string());
-                        files_list.push(protocol::PackwizMod {
-                            name: name.clone(),
-                            filename: display_filename.clone(),
-                            toml_path: display_filename, // Usamos la ruta del archivo mismo
-                            side,
-                        });
-                    }
+            let mut mod_name = String::new();
+            let mut mod_filename = String::new();
+            let mut side = "both".to_string();
+            for line in content.lines() {
+                let line = line.trim();
+                if line.starts_with("name =") {
+                    mod_name = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                }
+                if line.starts_with("filename =") {
+                    mod_filename = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                }
+                if line.starts_with("side =") {
+                    side = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
                 }
             }
+            if mod_name.is_empty() { continue; }
+
+            let category = category_for_path(rel_path);
+            let folder_prefix = match rel_path.rfind('/') {
+                Some(idx) => &rel_path[..idx],
+                None => "",
+            };
+            let final_filename = if folder_prefix.is_empty() {
+                mod_filename.clone()
+            } else {
+                format!("{}/{}", folder_prefix, mod_filename)
+            };
+
+            files_list.push(protocol::PackwizMod {
+                name: mod_name,
+                filename: final_filename,
+                toml_path: rel_path.clone(),
+                side,
+                category,
+            });
         }
 
+        // 2) Archivos crudos (.jar/.zip) no referenciados por ningún .toml
+        let referenced_jars: std::collections::HashSet<String> =
+            files_list.iter().map(|m| m.filename.clone()).collect();
 
-        let mut referenced_jars = std::collections::HashSet::new();
-        for m in &files_list {
-            if m.toml_path.ends_with(".toml") {
-                referenced_jars.insert(m.filename.clone());
-            }
+        for rel_path in &all_files {
+            let ext = std::path::Path::new(rel_path).extension().and_then(|e| e.to_str()).unwrap_or("");
+            if ext != "jar" && ext != "zip" { continue; }
+            if referenced_jars.contains(rel_path) { continue; }
+
+            let name = std::path::Path::new(rel_path).file_name().unwrap_or_default().to_string_lossy().to_string();
+            let side = index_sides.get(rel_path).cloned().unwrap_or_else(|| "both".to_string());
+            let category = category_for_path(rel_path);
+
+            files_list.push(protocol::PackwizMod {
+                name,
+                filename: rel_path.clone(),
+                toml_path: rel_path.clone(),
+                side,
+                category,
+            });
         }
-        files_list.retain(|m| m.toml_path.ends_with(".toml") || !referenced_jars.contains(&m.filename));
 
-        files_list.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
-        let _ = tx_clone.send(ServerEvent::PackwizModsList {
-            id,
-            mods: files_list,
+        files_list.sort_by(|a, b| {
+            a.category.to_lowercase().cmp(&b.category.to_lowercase())
+                .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
         });
+
+        let _ = tx_clone.send(ServerEvent::PackwizModsList { id, mods: files_list });
     });
 }
 

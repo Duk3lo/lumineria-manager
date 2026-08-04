@@ -7,6 +7,7 @@ import {
     createDirectory as apiCreateDirectory,
     uploadMod as apiUploadFile,
     listPackwizFiles as apiListFiles,
+    moveFile as apiMoveFile,
 } from './actions.js';
 
 function escapeHtml(str) {
@@ -102,6 +103,53 @@ export function createFileExplorer({ scope, ids }) {
         container.innerHTML = html;
 
         container.querySelectorAll('.tree-node').forEach(node => {
+            const nodePath = node.dataset.path;
+            const nodeIsDir = node.dataset.isdir === "true";
+
+            if (nodePath !== ".") {
+                node.setAttribute('draggable', 'true');
+                node.addEventListener('dragstart', (e) => {
+                    e.stopPropagation();
+                    e.dataTransfer.setData('text/plain', nodePath);
+                    e.dataTransfer.effectAllowed = 'move';
+                });
+            }
+            if (nodeIsDir) {
+                node.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    node.style.background = 'rgba(166, 227, 161, 0.15)';
+                });
+                node.addEventListener('dragleave', () => { node.style.background = ''; });
+                node.addEventListener('drop', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    node.style.background = '';
+                    const sourcePath = e.dataTransfer.getData('text/plain');
+                    if (!sourcePath || sourcePath === nodePath) return;
+                    if (nodePath !== "." && (nodePath === sourcePath || nodePath.startsWith(sourcePath + "/"))) {
+                        return alert("No podés mover una carpeta dentro de sí misma.");
+                    }
+                    const fileName = sourcePath.split('/').pop();
+                    const destPath = nodePath === "." ? fileName : `${nodePath}/${fileName}`;
+                    if (destPath === sourcePath) return;
+                    try {
+                        await apiMoveFile(currentServerId, sourcePath, destPath, scope);
+                        if (currentSelectedPath === sourcePath) {
+                            currentSelectedPath = ".";
+                            el(ids.selectedPath).innerText = "/ (Raíz)";
+                            el(ids.folderPanel).style.display = 'flex';
+                            el(ids.folderPanel).classList.remove('hidden');
+                            el(ids.filePanel).style.display = 'none';
+                            el(ids.filePanel).classList.add('hidden');
+                        }
+                        setTimeout(() => listFiles(), 500);
+                    } catch (err) {
+                        alert("Error al mover: " + err);
+                    }
+                });
+            }
+
             node.addEventListener('click', (e) => {
                 e.stopPropagation();
                 currentSelectedPath = node.dataset.path;

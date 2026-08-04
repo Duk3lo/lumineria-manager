@@ -156,3 +156,67 @@ pub(crate) async fn create_directory(
         }
     });
 }
+
+pub(crate) async fn move_file(
+    state: &AppState,
+    tx: &mpsc::UnboundedSender<ServerEvent>,
+    id: String,
+    from: String,
+    to: String,
+    scope: protocol::FileScope,
+) {
+    let tx_clone = tx.clone();
+    let root_clone = state.root.clone();
+    tokio::spawn(async move {
+        let base = base_dir_for_scope(&root_clone, &id, scope);
+
+        let from_path = match safe_join(&base, &from) {
+            Ok(p) => p,
+            Err(e) => { let _ = tx_clone.send(ServerEvent::Error { message: e }); return; }
+        };
+        let to_path = match safe_join(&base, &to) {
+            Ok(p) => p,
+            Err(e) => { let _ = tx_clone.send(ServerEvent::Error { message: e }); return; }
+        };
+
+        if !from_path.exists() {
+            let _ = tx_clone.send(ServerEvent::Error { message: format!("'{from}' no existe.") });
+            return;
+        }
+        if to_path.exists() {
+            let _ = tx_clone.send(ServerEvent::Error { message: format!("Ya existe algo en '{to}'.") });
+            return;
+        }
+        if from_path.is_dir() && to_path.starts_with(&from_path) {
+            let _ = tx_clone.send(ServerEvent::Error {
+                message: "No podés mover una carpeta dentro de sí misma.".into(),
+            });
+            return;
+        }
+
+        if let Some(parent) = to_path.parent() {
+            let _ = tokio::fs::create_dir_all(parent).await;
+        }
+
+        if let Err(e) = tokio::fs::rename(&from_path, &to_path).await {
+            let _ = tx_clone.send(ServerEvent::Error {
+                message: format!("No pude mover '{from}' a '{to}': {e}"),
+            });
+            return;
+        }
+
+        if scope == protocol::FileScope::Packwiz {
+            let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
+            let _ = tokio::process::Command::new(&packwiz_bin)
+                .arg("refresh")
+                .current_dir(&base)
+                .output()
+                .await;
+        }
+
+        let _ = tx_clone.send(ServerEvent::Ack {
+            ok: true,
+            message: Some(format!("Movido a '{to}'")),
+        });
+    });
+}

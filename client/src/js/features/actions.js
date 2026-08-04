@@ -26,6 +26,11 @@ export async function sendAction(type, id) {
     }
 }
 
+export async function moveFile(id, from, to, scope = "packwiz") {
+    updateStatus("Moviendo archivo...", "#f9e2af");
+    await invoke('move_packwiz_file', { id, from, to, scope });
+}
+
 export async function confirmDelete(id) {
     const confirmed = await showConfirm(
         `¿Estás seguro de eliminar el servidor '${id}'?\nEsta acción BORRARÁ TODO (Mundos, Plugins, Logs y el Contenedor) y no se puede revertir.`,
@@ -58,9 +63,9 @@ export async function openServerFolder(id) {
     }
 }
 
-export async function addMod(id, query) {
+export async function addMod(id, query, category = "auto") {
     updateStatus("Añadiendo mod...", "#f9e2af");
-    await invoke('add_mod_packwiz', { id, query });
+    await invoke('add_mod_packwiz', { id, query, category });
 }
 export async function removeMod(id, query) {
     updateStatus("Eliminando mod...", "#f9e2af");
