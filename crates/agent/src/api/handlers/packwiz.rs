@@ -801,7 +801,6 @@ fn suggest_default_side(rel_path: &str) -> Option<&'static str> {
     }
 }
 
-
 async fn apply_default_sides(
     packwiz_dir: &std::path::Path,
     files_list: &mut Vec<protocol::PackwizMod>,
