@@ -5,9 +5,7 @@ import { invoke_ws_action } from './actions.js';
 import { switchTab } from '../ui/tabs.js';
 import { showConfirm } from '../ui/confirmModal.js';
 
-// 👇 NUEVO: si la URL no es wss:// (cifrada) y tampoco apunta a localhost/127.0.0.1,
-// el token y todo el tráfico (archivos, comandos de consola, credenciales RCON)
-// viajarían en texto plano por la red. Avisamos antes de conectar.
+
 function isSecureOrLocal(rawUrl) {
     let u;
     try {

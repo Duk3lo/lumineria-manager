@@ -735,114 +735,6 @@ fn collect_pack_files<'a>(
     })
 }
 
-pub(crate) async fn list_mods(
-    state: &AppState,
-    tx: &mpsc::UnboundedSender<ServerEvent>,
-    id: String,
-) {
-    let tx_clone = tx.clone();
-    let root_clone = state.root.clone();
-    tokio::spawn(async move {
-        let packwiz_dir = root_clone.join(&id).join("packwiz");
-        let index_path = packwiz_dir.join("index.toml");
-
-        let mut index_sides: std::collections::HashMap<String, String> = std::collections::HashMap::new();
-        if let Ok(index_content) = tokio::fs::read_to_string(&index_path).await {
-            let mut current_file = String::new();
-            for line in index_content.lines() {
-                let line = line.trim();
-                if line.starts_with("file =") {
-                    current_file = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
-                }
-                if line.starts_with("meta.side =") {
-                    let side = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
-                    if !current_file.is_empty() {
-                        index_sides.insert(current_file.clone(), side);
-                    }
-                }
-            }
-        }
-
-        let all_files = collect_pack_files(&packwiz_dir, String::new()).await;
-        let mut files_list = Vec::new();
-
-        // 1) Metadatos .toml
-        for rel_path in &all_files {
-            let lower = rel_path.to_lowercase();
-            if lower == "pack.toml" || lower == "index.toml" { continue; }
-            if std::path::Path::new(rel_path).extension().and_then(|e| e.to_str()) != Some("toml") { continue; }
-
-            let full_path = packwiz_dir.join(rel_path);
-            let Ok(content) = tokio::fs::read_to_string(&full_path).await else { continue };
-
-            let mut mod_name = String::new();
-            let mut mod_filename = String::new();
-            let mut side = "both".to_string();
-            for line in content.lines() {
-                let line = line.trim();
-                if line.starts_with("name =") {
-                    mod_name = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
-                }
-                if line.starts_with("filename =") {
-                    mod_filename = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
-                }
-                if line.starts_with("side =") {
-                    side = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
-                }
-            }
-            if mod_name.is_empty() { continue; }
-
-            let category = category_for_path(rel_path);
-            let folder_prefix = match rel_path.rfind('/') {
-                Some(idx) => &rel_path[..idx],
-                None => "",
-            };
-            let final_filename = if folder_prefix.is_empty() {
-                mod_filename.clone()
-            } else {
-                format!("{}/{}", folder_prefix, mod_filename)
-            };
-
-            files_list.push(protocol::PackwizMod {
-                name: mod_name,
-                filename: final_filename,
-                toml_path: rel_path.clone(),
-                side,
-                category,
-            });
-        }
-
-        // 2) Archivos crudos (.jar/.zip) no referenciados por ningún .toml
-        let referenced_jars: std::collections::HashSet<String> =
-            files_list.iter().map(|m| m.filename.clone()).collect();
-
-        for rel_path in &all_files {
-            let ext = std::path::Path::new(rel_path).extension().and_then(|e| e.to_str()).unwrap_or("");
-            if ext != "jar" && ext != "zip" { continue; }
-            if referenced_jars.contains(rel_path) { continue; }
-
-            let name = std::path::Path::new(rel_path).file_name().unwrap_or_default().to_string_lossy().to_string();
-            let side = index_sides.get(rel_path).cloned().unwrap_or_else(|| "both".to_string());
-            let category = category_for_path(rel_path);
-
-            files_list.push(protocol::PackwizMod {
-                name,
-                filename: rel_path.clone(),
-                toml_path: rel_path.clone(),
-                side,
-                category,
-            });
-        }
-
-        files_list.sort_by(|a, b| {
-            a.category.to_lowercase().cmp(&b.category.to_lowercase())
-                .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-        });
-
-        let _ = tx_clone.send(ServerEvent::PackwizModsList { id, mods: files_list });
-    });
-}
-
 async fn existing_image_filename(images_dir: &std::path::Path, pack_key: &str) -> Option<String> {
     let mut entries = tokio::fs::read_dir(images_dir).await.ok()?;
     while let Ok(Some(entry)) = entries.next_entry().await {
@@ -885,6 +777,233 @@ async fn sync_mods_to_running_server(
     }
 
     sync_result
+}
+
+
+fn suggest_default_side(rel_path: &str) -> Option<&'static str> {
+    let lower = rel_path.to_lowercase();
+    let file_name = lower.rsplit('/').next().unwrap_or(&lower);
+    let top_folder = lower.split('/').next().unwrap_or("");
+
+    // Carpetas completas con lado obvio
+    if top_folder == "plugins" { return Some("server"); }
+    if top_folder == "resourcepacks" || top_folder == "shaderpacks" { return Some("client"); }
+
+    // Archivos puntuales conocidos (normalmente en la raíz del pack)
+    match file_name {
+        "options.txt" | "optionsof.txt" | "optionsshaders.txt" | "servers.dat"
+        | "hotbar.nbt" | "usercache.json" | "realms_persistence.json" => Some("client"),
+        "ops.json" | "whitelist.json" | "banned-players.json" | "banned-ips.json"
+        | "bukkit.yml" | "spigot.yml" | "paper.yml" | "paper-global.yml"
+        | "paper-world-defaults.yml" | "commands.yml" | "permissions.yml"
+        | "help.yml" | "server.properties" => Some("server"),
+        _ => None, // "config/" queda ambiguo a propósito: elegís vos por archivo
+    }
+}
+
+
+async fn apply_default_sides(
+    packwiz_dir: &std::path::Path,
+    files_list: &mut Vec<protocol::PackwizMod>,
+) {
+    let mut any_changed = false;
+
+    for m in files_list.iter_mut() {
+        if m.side != "both" { continue; }
+        let Some(suggested) = suggest_default_side(&m.filename) else { continue; };
+
+        let full_path = packwiz_dir.join(&m.toml_path);
+        let is_meta_toml = m.toml_path.ends_with(".toml") && {
+            if let Ok(content) = tokio::fs::read_to_string(&full_path).await {
+                let has_name = content.lines().any(|l| l.trim().starts_with("name ="));
+                let has_filename = content.lines().any(|l| l.trim().starts_with("filename ="));
+                has_name && has_filename
+            } else {
+                false
+            }
+        };
+
+        if is_meta_toml {
+            if let Ok(content) = tokio::fs::read_to_string(&full_path).await {
+                let mut found = false;
+                let new_lines: Vec<String> = content.lines().map(|line| {
+                    if line.trim_start().starts_with("side =") {
+                        found = true;
+                        format!("side = \"{}\"", suggested)
+                    } else {
+                        line.to_string()
+                    }
+                }).collect();
+                let mut new_content = new_lines.join("\n");
+                if !found {
+                    new_content.push_str(&format!("\nside = \"{}\"", suggested));
+                }
+                new_content.push('\n');
+                if tokio::fs::write(&full_path, new_content).await.is_ok() {
+                    m.side = suggested.to_string();
+                    any_changed = true;
+                }
+            }
+        } else {
+            let index_path = packwiz_dir.join("index.toml");
+            if let Ok(content) = tokio::fs::read_to_string(&index_path).await {
+                let mut new_content = String::new();
+                let mut in_target_file = false;
+                let mut added_meta = false;
+
+                for line in content.lines() {
+                    if line.trim().starts_with("file =") {
+                        let f = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                        in_target_file = f == m.toml_path;
+                        added_meta = false;
+                    }
+
+                    if in_target_file && line.trim().starts_with("[[files]]") {
+                        new_content.push_str(&format!("meta.side = \"{}\"\n", suggested));
+                        added_meta = true;
+                        in_target_file = false;
+                    }
+
+                    new_content.push_str(line);
+                    new_content.push('\n');
+                }
+                if in_target_file && !added_meta {
+                    new_content.push_str(&format!("meta.side = \"{}\"\n", suggested));
+                }
+
+                if tokio::fs::write(&index_path, new_content).await.is_ok() {
+                    m.side = suggested.to_string();
+                    any_changed = true;
+                }
+            }
+        }
+    }
+
+    if any_changed {
+        let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
+        let _ = tokio::process::Command::new(&packwiz_bin)
+            .arg("refresh")
+            .current_dir(packwiz_dir)
+            .output()
+            .await;
+    }
+}
+
+pub(crate) async fn list_mods(
+    state: &AppState,
+    tx: &mpsc::UnboundedSender<ServerEvent>,
+    id: String,
+) {
+    let tx_clone = tx.clone();
+    let root_clone = state.root.clone();
+    tokio::spawn(async move {
+        let packwiz_dir = root_clone.join(&id).join("packwiz");
+        let index_path = packwiz_dir.join("index.toml");
+
+        let mut index_sides: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+        if let Ok(index_content) = tokio::fs::read_to_string(&index_path).await {
+            let mut current_file = String::new();
+            for line in index_content.lines() {
+                let line = line.trim();
+                if line.starts_with("file =") {
+                    current_file = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                }
+                if line.starts_with("meta.side =") {
+                    let side = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                    if !current_file.is_empty() {
+                        index_sides.insert(current_file.clone(), side);
+                    }
+                }
+            }
+        }
+
+        let all_files = collect_pack_files(&packwiz_dir, String::new()).await;
+        let mut files_list = Vec::new();
+        let mut handled_meta_tomls: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut referenced_targets: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+        // 1) Metadatos .toml REALES de packwiz (tienen name= y filename=)
+        for rel_path in &all_files {
+            let lower = rel_path.to_lowercase();
+            if lower == "pack.toml" || lower == "index.toml" { continue; }
+            if std::path::Path::new(rel_path).extension().and_then(|e| e.to_str()) != Some("toml") { continue; }
+
+            let full_path = packwiz_dir.join(rel_path);
+            let Ok(content) = tokio::fs::read_to_string(&full_path).await else { continue };
+
+            let mut mod_name = String::new();
+            let mut mod_filename = String::new();
+            let mut side = "both".to_string();
+            for line in content.lines() {
+                let line = line.trim();
+                if line.starts_with("name =") {
+                    mod_name = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                }
+                if line.starts_with("filename =") {
+                    mod_filename = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                }
+                if line.starts_with("side =") {
+                    side = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
+                }
+            }
+            // No tiene name+filename -> no es un metafile real de packwiz,
+            // es un .toml de configuración normal (se procesa como archivo crudo abajo)
+            if mod_name.is_empty() || mod_filename.is_empty() { continue; }
+
+            let category = category_for_path(rel_path);
+            let folder_prefix = match rel_path.rfind('/') {
+                Some(idx) => &rel_path[..idx],
+                None => "",
+            };
+            let final_filename = if folder_prefix.is_empty() {
+                mod_filename.clone()
+            } else {
+                format!("{}/{}", folder_prefix, mod_filename)
+            };
+
+            handled_meta_tomls.insert(rel_path.clone());
+            referenced_targets.insert(final_filename.clone());
+
+            files_list.push(protocol::PackwizMod {
+                name: mod_name,
+                filename: final_filename,
+                toml_path: rel_path.clone(),
+                side,
+                category,
+            });
+        }
+
+        // 2) TODO lo demás: jar/zip custom, configs sueltos, .txt, .json, .toml
+        //    que no son metadata real, etc. — cualquier cosa que viva en el pack.
+        for rel_path in &all_files {
+            let lower = rel_path.to_lowercase();
+            if lower == "pack.toml" || lower == "index.toml" { continue; }
+            if handled_meta_tomls.contains(rel_path) { continue; }
+            if referenced_targets.contains(rel_path) { continue; }
+
+            let name = std::path::Path::new(rel_path).file_name().unwrap_or_default().to_string_lossy().to_string();
+            let side = index_sides.get(rel_path).cloned().unwrap_or_else(|| "both".to_string());
+            let category = category_for_path(rel_path);
+
+            files_list.push(protocol::PackwizMod {
+                name,
+                filename: rel_path.clone(),
+                toml_path: rel_path.clone(),
+                side,
+                category,
+            });
+        }
+
+        // Aplica los lados sugeridos SOLO donde todavía no hay uno explícito
+        apply_default_sides(&packwiz_dir, &mut files_list).await;
+
+        files_list.sort_by(|a, b| {
+            a.category.to_lowercase().cmp(&b.category.to_lowercase())
+                .then(a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+        });
+
+        let _ = tx_clone.send(ServerEvent::PackwizModsList { id, mods: files_list });
+    });
 }
 
 pub(crate) async fn sync_to_server(
@@ -958,17 +1077,26 @@ pub(crate) async fn change_mod_side(
     let root_clone = state.root.clone();
     tokio::spawn(async move {
         let packwiz_dir = root_clone.join(&id).join("packwiz");
-        
-        if toml_path.ends_with(".toml") {
-            // Mod Oficial: Editamos su archivo .toml
-            let full_path = match crate::api::utils::safe_join(&packwiz_dir, &toml_path) {
-                Ok(p) => p,
-                Err(e) => { let _ = tx_clone.send(ServerEvent::Error { message: e }); return; }
-            };
 
+        let full_path = match crate::api::utils::safe_join(&packwiz_dir, &toml_path) {
+            Ok(p) => p,
+            Err(e) => { let _ = tx_clone.send(ServerEvent::Error { message: e }); return; }
+        };
+
+        let is_meta_toml = toml_path.ends_with(".toml") && {
+            if let Ok(content) = tokio::fs::read_to_string(&full_path).await {
+                let has_name = content.lines().any(|l| l.trim().starts_with("name ="));
+                let has_filename = content.lines().any(|l| l.trim().starts_with("filename ="));
+                has_name && has_filename
+            } else {
+                false
+            }
+        };
+
+        if is_meta_toml {
             if let Ok(content) = tokio::fs::read_to_string(&full_path).await {
                 let mut found = false;
-                let mut new_lines: Vec<String> = content.lines().map(|line| {
+                let new_lines: Vec<String> = content.lines().map(|line| {
                     if line.trim_start().starts_with("side =") {
                         found = true;
                         format!("side = \"{}\"", side)
@@ -977,38 +1105,36 @@ pub(crate) async fn change_mod_side(
                     }
                 }).collect();
 
-                if !found { new_lines.push(format!("side = \"{}\"", side)); }
-
-                let _ = tokio::fs::write(&full_path, new_lines.join("\n") + "\n").await;
+                let mut new_content = new_lines.join("\n");
+                if !found {
+                    new_content.push_str(&format!("\nside = \"{}\"", side));
+                }
+                new_content.push('\n');
+                let _ = tokio::fs::write(&full_path, new_content).await;
             }
         } else {
-            // Mod Custom (.jar): Editamos el index.toml
             let index_path = packwiz_dir.join("index.toml");
             if let Ok(content) = tokio::fs::read_to_string(&index_path).await {
                 let mut new_content = String::new();
                 let mut in_target_file = false;
                 let mut added_meta = false;
-                
+
                 for line in content.lines() {
                     if line.trim().starts_with("file =") {
                         let f = line.split('=').nth(1).unwrap_or_default().replace('"', "").trim().to_string();
-                        if f == toml_path {
-                            in_target_file = true;
-                            added_meta = false;
-                        } else {
-                            in_target_file = false;
-                        }
+                        in_target_file = f == toml_path;
+                        added_meta = false;
                     }
-                    
+
                     if in_target_file && line.trim().starts_with("meta.side =") {
-                        if side == "both" { continue; } // Si es both, borramos la regla
+                        if side == "both" { continue; }
                         else {
                             new_content.push_str(&format!("meta.side = \"{}\"\n", side));
                             added_meta = true;
                             continue;
                         }
                     }
-                    
+
                     if in_target_file && line.trim().starts_with("[[files]]") {
                         if !added_meta && side != "both" {
                             new_content.push_str(&format!("meta.side = \"{}\"\n", side));
@@ -1027,7 +1153,6 @@ pub(crate) async fn change_mod_side(
             }
         }
 
-        // Refrescar packwiz para que aplique los cambios
         let packwiz_bin = crate::system::deps::resolve_packwiz_bin();
         let _ = tokio::process::Command::new(&packwiz_bin)
             .arg("refresh")
@@ -1039,8 +1164,7 @@ pub(crate) async fn change_mod_side(
             id: id.clone(),
             line: format!("✅ Lado cambiado a '{}' para {}.", side, toml_path),
         });
-        
-        // Esto le dice al frontend que recargue la lista automáticamente
+
         let _ = tx_clone.send(ServerEvent::Ack { ok: true, message: None });
     });
 }
