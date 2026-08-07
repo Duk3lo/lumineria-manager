@@ -710,33 +710,41 @@ export function renderPackwizMods(mods) {
     container.innerHTML = `
         <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 0.9em; color: #cdd6f4;">
             <thead>
-                <tr style="border-bottom: 2px solid #313244; color: #a6adc8;">
-                    <th style="padding: 8px;">Tipo</th>
-                    <th style="padding: 8px;">Nombre de Archivo / Recurso</th>
-                    <th style="padding: 8px; text-align: right;">Lado (Side)</th>
-                </tr>
-            </thead>
+    <tr style="border-bottom: 2px solid #313244; color: #a6adc8;">
+        <th style="padding: 8px;">Tipo</th>
+        <th style="padding: 8px;">Nombre de Archivo / Recurso</th>
+        <th style="padding: 8px; text-align: right;">Lado (Side)</th>
+        <th style="padding: 8px; text-align: center;">Acciones</th>
+    </tr>
+</thead>
             <tbody>
                 ${visible.map(mod => {
         const sideBadge = `
-                        <select class="mod-side-select" data-toml="${escapeHtml(mod.toml_path)}" style="background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 4px; font-size: 0.8rem; cursor: pointer;">
-                            <option value="both" ${mod.side === 'both' || !mod.side ? 'selected' : ''}>Ambos</option>
-                            <option value="client" ${mod.side === 'client' ? 'selected' : ''}>Solo Cliente</option>
-                            <option value="server" ${mod.side === 'server' ? 'selected' : ''}>Solo Servidor</option>
-                        </select>
-                    `;
+        <select class="mod-side-select" data-toml="${escapeHtml(mod.toml_path)}" style="background: #1e1e2e; color: #cdd6f4; border: 1px solid #45475a; border-radius: 4px; padding: 4px; font-size: 0.8rem; cursor: pointer;">
+            <option value="both" ${mod.side === 'both' || !mod.side ? 'selected' : ''}>Ambos</option>
+            <option value="client" ${mod.side === 'client' ? 'selected' : ''}>Solo Cliente</option>
+            <option value="server" ${mod.side === 'server' ? 'selected' : ''}>Solo Servidor</option>
+        </select>
+    `;
         const meta = categoryMeta(mod.category);
         const typeBadge = `<span style="color: ${meta.color};">${meta.icon} ${escapeHtml(meta.label)}</span>`;
+
+        // Si es un .toml de metadata real de packwiz (name+filename), se borra con "packwiz remove".
+        // Si es un archivo suelto (config, texto, jar subido a mano), se borra como archivo normal.
+        const isMetaTracked = mod.toml_path.toLowerCase().endsWith('.toml') && mod.toml_path !== mod.filename;
+        const deleteBtn = `<button class="secondary-btn pw-mod-delete-btn" data-name="${escapeHtml(mod.name)}" data-toml="${escapeHtml(mod.toml_path)}" data-ismeta="${isMetaTracked}" title="Eliminar" style="color:#f38ba8; border-color:#f38ba8; padding:4px 10px; font-size:0.85em;">🗑</button>`;
+
         return `
-                        <tr style="border-bottom: 1px solid #313244;">
-                            <td style="padding: 8px; font-weight: bold;">${typeBadge}</td>
-                            <td style="padding: 8px; color: #cdd6f4;">
-                                <div style="font-weight: bold; color: #f5c2e7;">${escapeHtml(mod.name)}</div>
-                                <div style="font-family: monospace; font-size: 0.8rem; color: #6c7086;">${escapeHtml(mod.filename)}</div>
-                            </td>
-                            <td style="padding: 8px; text-align: right;">${sideBadge}</td>
-                        </tr>
-                    `;
+        <tr style="border-bottom: 1px solid #313244;">
+            <td style="padding: 8px; font-weight: bold;">${typeBadge}</td>
+            <td style="padding: 8px; color: #cdd6f4;">
+                <div style="font-weight: bold; color: #f5c2e7;">${escapeHtml(mod.name)}</div>
+                <div style="font-family: monospace; font-size: 0.8rem; color: #6c7086;">${escapeHtml(mod.filename)}</div>
+            </td>
+            <td style="padding: 8px; text-align: right;">${sideBadge}</td>
+            <td style="padding: 8px; text-align: center;">${deleteBtn}</td>
+        </tr>
+    `;
     }).join('')}
             </tbody>
         </table>
@@ -754,6 +762,29 @@ export function renderPackwizMods(mods) {
                 e.target.disabled = false;
             }
         });
+    });
+
+    container.querySelectorAll('.pw-mod-delete-btn').forEach(btn => {
+        btn.onclick = async () => {
+            const name = btn.dataset.name;
+            const tomlPath = btn.dataset.toml;
+            const isMeta = btn.dataset.ismeta === 'true';
+            const ok = await showConfirm(`¿Eliminar '${name}' del pack?`, 'Eliminar del Modpack');
+            if (!ok) return;
+
+            btn.disabled = true;
+            try {
+                if (isMeta) {
+                    await removeMod(currentServerId, name);
+                } else {
+                    await deleteFile(currentServerId, tomlPath, 'packwiz');
+                }
+            } catch (err) {
+                alert("Error al eliminar: " + err);
+            } finally {
+                btn.disabled = false;
+            }
+        };
     });
 }
 

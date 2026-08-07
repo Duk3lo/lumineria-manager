@@ -586,6 +586,8 @@ async fn update_server(
                 id: id.clone(),
                 line: format!("❌ Error al sincronizar mods/plugins: {e}"),
             });
+        } else {
+            super::packwiz::remove_client_only_files(&dest_dir, &pack_dir, &id, &tx).await;
         }
     }
 
