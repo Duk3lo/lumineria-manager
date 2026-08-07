@@ -765,27 +765,29 @@ export function renderPackwizMods(mods) {
     });
 
     container.querySelectorAll('.pw-mod-delete-btn').forEach(btn => {
-        btn.onclick = async () => {
-            const name = btn.dataset.name;
-            const tomlPath = btn.dataset.toml;
-            const isMeta = btn.dataset.ismeta === 'true';
-            const ok = await showConfirm(`¿Eliminar '${name}' del pack?`, 'Eliminar del Modpack');
-            if (!ok) return;
+    btn.onclick = async () => {
+        const name = btn.dataset.name;
+        const tomlPath = btn.dataset.toml;
+        const isMeta = btn.dataset.ismeta === 'true';
+        const ok = await showConfirm(`¿Eliminar '${name}' del pack?`, 'Eliminar del Modpack');
+        if (!ok) return;
 
-            btn.disabled = true;
-            try {
-                if (isMeta) {
-                    await removeMod(currentServerId, name);
-                } else {
-                    await deleteFile(currentServerId, tomlPath, 'packwiz');
-                }
-            } catch (err) {
-                alert("Error al eliminar: " + err);
-            } finally {
-                btn.disabled = false;
+        btn.disabled = true;
+        try {
+            if (isMeta) {
+                const fileName = tomlPath.split('/').pop();
+                const slug = fileName.replace(/\.pw\.toml$/i, '').replace(/\.toml$/i, '');
+                await removeMod(currentServerId, slug);
+            } else {
+                await deleteFile(currentServerId, tomlPath, 'packwiz');
             }
-        };
-    });
+        } catch (err) {
+            alert("Error al eliminar: " + err);
+        } finally {
+            btn.disabled = false;
+        }
+    };
+});
 }
 
 
